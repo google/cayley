@@ -239,6 +239,11 @@ func testSet(qs graph.QuadStore) []test {
 			expect:  []quad.Value{vCool},
 		},
 		{
+			message: "has then has regex",
+			path:    StartPath(qs).Has(vStatus, vSmart).HasRegex(vStatus, "co+l.[pP]er.+n"),
+			expect:  []quad.Value{vGreg},
+		},
+		{
 			message: "use .Tag()-.Is()-.Back()",
 			path:    StartPath(qs, vBob).In(vFollows).Tag("foo").Out(vStatus).Is(vCool).Back("foo"),
 			expect:  []quad.Value{vDani},
