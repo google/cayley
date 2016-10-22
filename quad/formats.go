@@ -62,3 +62,12 @@ func FormatByExt(name string) *Format {
 func FormatByMime(name string) *Format {
 	return formatsByMime[name]
 }
+
+// Formats returns a list of all supported quad formats.
+func Formats() []Format {
+	list := make([]Format, 0, len(formatsByName))
+	for _, f := range formatsByName {
+		list = append(list, *f)
+	}
+	return list
+}
