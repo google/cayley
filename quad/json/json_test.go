@@ -34,10 +34,12 @@ var readTests = []struct {
 		message: "parse correct JSON",
 		input: `[
 			{"subject": "foo", "predicate": "bar", "object": "baz"},
+			{"subject":"_:foo","predicate":"\u003cbar\u003e","object":"\"baz\"@en"},
 			{"subject": "foo", "predicate": "bar", "object": "baz", "label": "graph"}
 		]`,
 		expect: []quad.Quad{
 			quad.MakeRaw("foo", "bar", "baz", ""),
+			quad.Make(quad.Raw("_:foo"), quad.Raw("<bar>"), quad.Raw(`"baz"@en`), nil),
 			quad.MakeRaw("foo", "bar", "baz", "graph"),
 		},
 		err: nil,
@@ -60,6 +62,16 @@ var readTests = []struct {
 		expect: nil,
 		err:    fmt.Errorf("invalid quad at index %d. %v", 0, quad.MakeRaw("foo", "bar", "", "")),
 	},
+	{
+		message: "unescape values",
+		input: `[
+			{"subject": "foo", "predicate": "bar", "object": "\"baz\""}
+		]`,
+		expect: []quad.Quad{
+			quad.MakeRaw("foo", "bar", `"baz"`, ""),
+		},
+		err: nil,
+	},
 }
 
 func TestReadJSON(t *testing.T) {
@@ -71,7 +83,7 @@ func TestReadJSON(t *testing.T) {
 			t.Errorf("Failed to %v with unexpected error, got:%v expected %v", test.message, err, test.err)
 		}
 		if !reflect.DeepEqual(got, test.expect) {
-			t.Errorf("Failed to %v, got:%v expect:%v", test.message, got, test.expect)
+			t.Errorf("Failed to %v, got:\n%v\nexpect:\n%v", test.message, got, test.expect)
 		}
 	}
 }
@@ -92,11 +104,24 @@ var writeTests = []struct {
 		message: "write JSON",
 		input: []quad.Quad{
 			quad.MakeRaw("foo", "bar", "baz", ""),
+			quad.Make(quad.BNode("foo"), quad.IRI("bar"), quad.LangString{"baz", "en"}, nil),
 			quad.MakeRaw("foo", "bar", "baz", "graph"),
 		},
 		expect: `[
 	{"subject":"foo","predicate":"bar","object":"baz"},
+	{"subject":"_:foo","predicate":"\u003cbar\u003e","object":"\"baz\"@en"},
 	{"subject":"foo","predicate":"bar","object":"baz","label":"graph"}
+]
+`,
+		err: nil,
+	},
+	{
+		message: "escape values",
+		input: []quad.Quad{
+			quad.MakeRaw("foo", "bar", `"baz"`, ""),
+		},
+		expect: `[
+	{"subject":"foo","predicate":"bar","object":"\"baz\""}
 ]
 `,
 		err: nil,

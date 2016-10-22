@@ -180,3 +180,68 @@ func TestWrite(t *testing.T) {
 		}
 	}
 }
+
+var testRoundtripCases = []struct {
+	data []quad.Quad
+}{
+	{
+		[]quad.Quad{
+			{
+				Subject:   quad.IRI(`http://example.org/id1`),
+				Predicate: quad.IRI(`http://example.org/term1`),
+				Object: quad.TypedString{
+					Value: "v1", Type: "http://example.org/datatype",
+				},
+				Label: nil,
+			},
+			{
+				Subject:   quad.IRI(`http://example.org/id1`),
+				Predicate: quad.IRI(`http://example.org/term2`),
+				Object:    quad.IRI(`http://example.org/id2`),
+				Label:     nil,
+			},
+			{
+				Subject:   quad.IRI(`http://example.org/id1`),
+				Predicate: quad.IRI(`http://example.org/term3`),
+				Object: quad.LangString{
+					Value: "v3", Lang: "en",
+				},
+				Label: nil,
+			},
+			{
+				Subject:   quad.IRI(`http://example.org/id1`),
+				Predicate: quad.IRI(`http://www.w3.org/1999/02/22-rdf-syntax-ns#type`),
+				Object:    quad.IRI(`http://example.org/Type1`),
+				Label:     nil,
+			},
+			{
+				Subject:   quad.IRI(`http://example.org/id1`),
+				Predicate: quad.IRI(`http://www.w3.org/1999/02/22-rdf-syntax-ns#type`),
+				Object:    quad.IRI(`http://example.org/Type2`),
+				Label:     nil,
+			},
+		},
+	},
+}
+
+func TestRoundtrip(t *testing.T) {
+	buf := bytes.NewBuffer(nil)
+	for i, c := range testRoundtripCases {
+		buf.Reset()
+		w := NewWriter(buf)
+		_, err := quad.Copy(w, quad.NewReader(c.data))
+		if err != nil {
+			t.Errorf("case %d failed: %v", i, err)
+		} else if err = w.Close(); err != nil {
+			t.Errorf("case %d failed: %v", i, err)
+		}
+		arr, err := quad.ReadAll(NewReader(buf))
+		sort.Sort(quad.ByQuadString(arr))
+		sort.Sort(quad.ByQuadString(c.data))
+		if err != nil {
+			t.Errorf("case %d failed: %v", i, err)
+		} else if !reflect.DeepEqual(arr, c.data) {
+			t.Errorf("case %d failed: wrong data returned:\n%v\n%v", i, arr, c.data)
+		}
+	}
+}
