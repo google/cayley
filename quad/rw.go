@@ -40,6 +40,12 @@ type ReadCloser interface {
 	io.Closer
 }
 
+type ReadSkipCloser interface {
+	Reader
+	Skiper
+	io.Closer
+}
+
 // BatchReader is an interface for reading quads in batches.
 //
 // ReadQuads reads at most len(buf) quads into buf. It returns number of quads that were read and an error.
