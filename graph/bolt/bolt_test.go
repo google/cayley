@@ -24,6 +24,7 @@ import (
 	"github.com/cayleygraph/cayley/graph/graphtest"
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/graph/path/pathtest"
+	"github.com/cayleygraph/cayley/graph/shape/shapetest"
 	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/writer"
 )
@@ -203,4 +204,8 @@ func TestOptimize(t *testing.T) {
 
 func TestBoltPaths(t *testing.T) {
 	pathtest.RunTestMorphisms(t, makeBolt)
+}
+
+func TestBoltShape(t *testing.T) {
+	shapetest.RunTestShapes(t, makeBolt)
 }
