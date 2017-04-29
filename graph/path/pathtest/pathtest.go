@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"sort"
 	"testing"
+	"time"
 
 	"golang.org/x/net/context"
 
@@ -371,11 +372,13 @@ func RunTestMorphisms(t testing.TB, fnc graphtest.DatabaseFunc) {
 			err error
 		)
 		for _, opt := range []bool{true, false} {
+			start := time.Now()
 			if test.tag == "" {
 				got, err = runTopLevel(qs, test.path, opt)
 			} else {
 				got, err = runTag(qs, test.path, test.tag, opt)
 			}
+			dt := time.Since(start)
 			unopt := ""
 			if !opt {
 				unopt = " (unoptimized)"
@@ -392,6 +395,8 @@ func RunTestMorphisms(t testing.TB, fnc graphtest.DatabaseFunc) {
 			}
 			if !eq {
 				t.Errorf("Failed to %s%s, got: %v(%d) expected: %v(%d)", test.message, unopt, got, len(got), test.expect, len(test.expect))
+			} else {
+				t.Logf("%s%s: %v", test.message, unopt, dt)
 			}
 		}
 	}
