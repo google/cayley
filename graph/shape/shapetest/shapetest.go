@@ -63,7 +63,7 @@ func makeTestStore(t testing.TB, fnc graphtest.DatabaseFunc, quads ...quad.Quad)
 	return qs, closer
 }
 
-func runTopLevel(qs graph.QuadStore, path *Path, opt bool) ([]quad.Value, error) {
+func runTopLevel(qs graph.QuadStore, path Path, opt bool) ([]quad.Value, error) {
 	pb := path.Iterate(context.TODO(), qs)
 	if !opt {
 		pb = pb.UnOptimized()
@@ -71,7 +71,7 @@ func runTopLevel(qs graph.QuadStore, path *Path, opt bool) ([]quad.Value, error)
 	return pb.Paths(false).AllValues(qs)
 }
 
-func runTag(qs graph.QuadStore, path *Path, tag string, opt bool) ([]quad.Value, error) {
+func runTag(qs graph.QuadStore, path Path, tag string, opt bool) ([]quad.Value, error) {
 	var out []quad.Value
 	pb := path.Iterate(context.TODO(), qs)
 	if !opt {
@@ -112,7 +112,7 @@ const (
 
 var cases = []struct {
 	message   string
-	path      *Path
+	path      Path
 	expect    []quad.Value
 	expectAlt []quad.Value
 	tag       string
@@ -154,7 +154,7 @@ var cases = []struct {
 	},
 	{
 		message: "use in with regex (include IRIs)",
-		path:    StartValues(vBob).In(vFollows).RegexWithRefs(regexp.MustCompile("ar?li.*e")),
+		path:    StartValues(vBob).In(vFollows).RegexpWithRefs(regexp.MustCompile("ar?li.*e")),
 		expect:  []quad.Value{vAlice, vCharlie},
 	},
 	{
