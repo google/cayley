@@ -18,6 +18,16 @@ func IsNull(s Shape) bool {
 	return s == nil || ok
 }
 
+func BuildIterator(qs graph.QuadStore, s Shape) graph.Iterator {
+	if s != nil {
+		s, _ = s.Optimize(qs)
+	}
+	if IsNull(s) {
+		return iterator.NewNull()
+	}
+	return s.BuildIterator(qs)
+}
+
 type Null struct{}
 
 func (Null) BuildIterator(qs graph.QuadStore) graph.Iterator {
@@ -234,6 +244,94 @@ func (s Quads) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
+// aka HasA
+type QuadDirection struct {
+	Dir   quad.Direction
+	Quads Shape
+}
+
+func (s QuadDirection) BuildIterator(qs graph.QuadStore) graph.Iterator {
+	if IsNull(s.Quads) {
+		return iterator.NewNull()
+	}
+	sub := s.Quads.BuildIterator(qs)
+	if s.Dir == quad.Any {
+		panic("direction is not set")
+	}
+	return iterator.NewHasA(qs, sub, s.Dir)
+}
+func (s QuadDirection) Optimize(qs graph.QuadStore) (Shape, bool) {
+	if IsNull(s.Quads) {
+		return nil, true
+	}
+	f, opt := s.Quads.Optimize(qs)
+	if opt {
+		s.Quads = f
+	}
+	q, ok := s.Quads.(Quads)
+	if !ok {
+		return s, opt
+	}
+	if len(q) == 1 && q[0].Dir == s.Dir {
+		return q[0].Values, true
+	}
+	var (
+		filt map[quad.Direction]graph.Value
+		save map[quad.Direction][]string
+		n    int
+	)
+	for _, f := range q {
+		if v, ok := One(f.Values); ok {
+			if filt == nil {
+				filt = make(map[quad.Direction]graph.Value)
+			}
+			if _, ok := filt[f.Dir]; ok {
+				return s, opt
+			}
+			filt[f.Dir] = v
+			n++
+		} else if sv, ok := f.Values.(Save); ok {
+			if _, ok = sv.From.(AllNodes); ok {
+				if save == nil {
+					save = make(map[quad.Direction][]string)
+				}
+				save[f.Dir] = append(save[f.Dir], sv.Tags...)
+				n++
+			}
+		}
+	}
+	if n == len(q) {
+		return QuadsAct{
+			Result: s.Dir,
+			Filter: filt,
+			Save:   save,
+		}, true
+	}
+	// TODO
+	return s, opt
+}
+
+type QuadsAct struct {
+	Result quad.Direction
+	Save   map[quad.Direction][]string
+	Filter map[quad.Direction]graph.Value
+}
+
+func (s QuadsAct) BuildIterator(qs graph.QuadStore) graph.Iterator {
+	q := make(Quads, 0, len(s.Save)+len(s.Filter))
+	for dir, val := range s.Filter {
+		q = append(q, QuadFilter{Dir: dir, Values: Fixed{val}})
+	}
+	for dir, tags := range s.Save {
+		q = append(q, QuadFilter{Dir: dir, Values: Save{From: AllNodes{}, Tags: tags}})
+	}
+	h := QuadDirection{Dir: s.Result, Quads: q}
+	return h.BuildIterator(qs)
+}
+func (s QuadsAct) Optimize(qs graph.QuadStore) (Shape, bool) {
+	return s, false
+}
+
 func One(s Shape) (graph.Value, bool) {
 	switch s := s.(type) {
 	case Fixed:
@@ -438,34 +536,6 @@ func (s Union) Optimize(qs graph.QuadStore) (Shape, bool) {
 		return s[0], true
 	}
 	// TODO: join Fixed
-	return s, opt
-}
-
-// aka HasA
-type QuadDirection struct {
-	Quads Shape
-	Dir   quad.Direction
-}
-
-func (s QuadDirection) BuildIterator(qs graph.QuadStore) graph.Iterator {
-	sub := s.Quads.BuildIterator(qs)
-	if s.Dir == quad.Any {
-		panic("direction is not set")
-	}
-	return iterator.NewHasA(qs, sub, s.Dir)
-}
-func (s QuadDirection) Optimize(qs graph.QuadStore) (Shape, bool) {
-	if IsNull(s.Quads) {
-		return nil, true
-	}
-	f, opt := s.Quads.Optimize(qs)
-	if opt {
-		s.Quads = f
-	}
-	if q, ok := s.Quads.(Quads); ok && len(q) == 1 && q[0].Dir == s.Dir {
-		return q[0].Values, true
-	}
-	// TODO
 	return s, opt
 }
 
