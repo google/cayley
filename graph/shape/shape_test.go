@@ -70,8 +70,8 @@ var optimizeCases = []struct {
 		opt: true,
 		expect: Intersect{
 			Fixed{1},
-			QuadDirection{Dir: quad.Subject, Quads: Quads{}},
-			Unique{QuadDirection{Dir: quad.Object, Quads: Quads{}}},
+			QuadsAct{Result: quad.Subject},
+			Unique{QuadsAct{Result: quad.Object}},
 		},
 		qs: lookupQuadStore{
 			quad.IRI("alice"): 1,
