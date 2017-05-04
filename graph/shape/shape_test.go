@@ -96,13 +96,14 @@ var optimizeCases = []struct {
 	{ // remove "all nodes" in intersect, merge Fixed and order them first
 		from: Intersect{
 			AllNodes{},
-			Fixed{1},
+			Fixed{1, 2},
 			Save{From: AllNodes{}, Tags: []string{"all"}},
 			Fixed{2},
 		},
 		opt: true,
 		expect: Intersect{
 			Fixed{1, 2},
+			Fixed{2},
 			Save{From: AllNodes{}, Tags: []string{"all"}},
 		},
 	},

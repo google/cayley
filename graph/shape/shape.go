@@ -430,7 +430,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 	}
 	var (
 		quads Quads
-		fixed Fixed
+		fixed []Fixed
 	)
 	remove := func(i *int, o bool) {
 		realloc()
@@ -458,7 +458,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 			}
 		case Fixed:
 			remove(&i, true)
-			fixed = append(fixed, c...)
+			fixed = append(fixed, c)
 		case Intersect:
 			remove(&i, true)
 			s = append(s, c...)
@@ -472,17 +472,20 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 		opt = opt || qopt
 		s = append(s, nq)
 	}
-	if len(fixed) != 0 {
-		s = append(s, nil)
-		copy(s[1:], s)
-		s[0] = fixed
+	if len(fixed) != 0 { // TODO: intersect fixed
+		ns := make(Intersect, len(s)+len(fixed))
+		for i, f := range fixed {
+			ns[i] = f
+		}
+		copy(ns[len(fixed):], s)
+		s = ns
 	}
 	if len(s) == 0 {
 		return nil, true
 	} else if len(s) == 1 {
 		return s[0], true
 	}
-	// TODO: optimize order, intersect Fixed
+	// TODO: optimize order
 	return s, opt
 }
 
