@@ -36,12 +36,6 @@ func StartValues(vals ...quad.Value) Path {
 	return StartFrom(s)
 }
 
-//type placeholder struct{}
-//
-//func Morphism() *Path {
-//	return StartFrom(&placeholder{})
-//}
-
 func StartFrom(s Shape) Path {
 	return Path{root: s}
 }

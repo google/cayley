@@ -1,26 +1,87 @@
 package shape
 
 import (
+	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/quad"
 	"regexp"
 )
 
+// Shape represent a query tree shape.
 type Shape interface {
+	// BuildIterator constructs an iterator tree from a given shapes and binds it to QuadStore.
 	BuildIterator(qs graph.QuadStore) graph.Iterator
+	// Optimize runs an optimization pass over a query shape.
+	//
+	// It returns a bool that indicates if shape was replaced and should always return a copy of shape in this case.
+	// In case no optimizations were made, it returns the same unmodified shape.
+	//
+	// If QuadStore is specified, it will be used to make optimizations specific for a given store.
 	Optimize(qs graph.QuadStore) (Shape, bool)
-	//Size(qs graph.QuadStore) (int64, bool)
 }
 
+// InternalQuad is an internal representation of quad index in QuadStore.
+type InternalQuad struct {
+	Subject   graph.Value
+	Predicate graph.Value
+	Object    graph.Value
+	Label     graph.Value
+}
+
+// Get returns a specified direction of the quad.
+func (q InternalQuad) Get(d quad.Direction) graph.Value {
+	switch d {
+	case quad.Subject:
+		return q.Subject
+	case quad.Predicate:
+		return q.Predicate
+	case quad.Object:
+		return q.Object
+	case quad.Label:
+		return q.Label
+	default:
+		return nil
+	}
+}
+
+// Set assigns a specified direction of the quad to a given value.
+func (q InternalQuad) Set(d quad.Direction, v graph.Value) {
+	switch d {
+	case quad.Subject:
+		q.Subject = v
+	case quad.Predicate:
+		q.Predicate = v
+	case quad.Object:
+		q.Object = v
+	case quad.Label:
+		q.Label = v
+	default:
+		panic(d)
+	}
+}
+
+type QuadIndexer interface {
+	SizeOfIndex(c map[quad.Direction]graph.Value) (int64, bool)
+	LookupQuadIndex(d quad.Direction, c map[quad.Direction]graph.Value) (InternalQuad, bool)
+}
+
+// IsNull safely checks if shape represents an empty set. It accounts for both Null and nil.
 func IsNull(s Shape) bool {
 	_, ok := s.(Null)
 	return s == nil || ok
 }
 
+// BuildIterator optimizes the shape and builds a corresponding iterator tree.
 func BuildIterator(qs graph.QuadStore, s Shape) graph.Iterator {
 	if s != nil {
+		if clog.V(2) {
+			clog.Infof("shape: %#v", s)
+		}
 		s, _ = s.Optimize(qs)
+		if clog.V(2) {
+			clog.Infof("optimized: %#v", s)
+		}
 	}
 	if IsNull(s) {
 		return iterator.NewNull()
@@ -28,6 +89,7 @@ func BuildIterator(qs graph.QuadStore, s Shape) graph.Iterator {
 	return s.BuildIterator(qs)
 }
 
+// Null represent an empty set. Mostly used as a safe alias for nil shape.
 type Null struct{}
 
 func (Null) BuildIterator(qs graph.QuadStore) graph.Iterator {
@@ -37,6 +99,17 @@ func (Null) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return nil, true
 }
 
+// AllNodes represents all nodes in QuadStore.
+type AllNodes struct{}
+
+func (s AllNodes) BuildIterator(qs graph.QuadStore) graph.Iterator {
+	return qs.NodesAllIterator()
+}
+func (s AllNodes) Optimize(qs graph.QuadStore) (Shape, bool) {
+	return s, false
+}
+
+// Except excludes a set on nodes from a source. If source is nil, AllNodes is assumed.
 type Except struct {
 	Nodes Shape
 	All   Shape
@@ -74,20 +147,12 @@ func (s Except) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
-type AllNodes struct{}
-
-func (s AllNodes) BuildIterator(qs graph.QuadStore) graph.Iterator {
-	return qs.NodesAllIterator()
-}
-func (s AllNodes) Optimize(qs graph.QuadStore) (Shape, bool) {
-	return s, false
-}
-
 type ValueFilter struct {
 	Op  iterator.Operator
 	Val quad.Value
 }
 
+// Filter filters all values from the source using a list of operations.
 type Filter struct {
 	From    Shape
 	Filters []ValueFilter
@@ -149,6 +214,7 @@ func (s Regexp) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
+// Count returns a count of objects in source as a single value. It always returns exactly one value.
 type Count struct {
 	Values Shape
 }
@@ -203,6 +269,7 @@ func (s QuadFilter) buildIterator(qs graph.QuadStore) graph.Iterator {
 	return iterator.NewLinksTo(qs, sub, s.Dir)
 }
 
+// Quads is a selector of quads with a given set of constraints. Empty or nil Quads is equivalent to AllQuads.
 type Quads []QuadFilter
 
 func (s Quads) BuildIterator(qs graph.QuadStore) graph.Iterator {
@@ -219,32 +286,41 @@ func (s Quads) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	return iterator.NewAnd(qs, its...)
 }
 func (s Quads) Optimize(qs graph.QuadStore) (Shape, bool) {
-	var nq Quads
-	// TODO: multiple constraints on the same dir -> merge as Intersect on Values of this dir
-	for i, f := range s {
-		if f.Values == nil {
-			continue
+	var opt bool
+	sw := 0
+	realloc := func() {
+		if !opt {
+			opt = true
+			nq := make(Quads, len(s))
+			copy(nq, s)
+			s = nq
 		}
-		v, ok := f.Values.Optimize(qs)
-		if !ok {
-			continue
-		} else if v == nil {
+	}
+	// TODO: multiple constraints on the same dir -> merge as Intersect on Values of this dir
+	for i := 0; i < len(s); i++ {
+		f := s[i]
+		if f.Values == nil {
 			return nil, true
 		}
-		if nq == nil {
-			nq = make(Quads, len(s))
-			copy(nq, s)
+		v, ok := f.Values.Optimize(qs)
+		if v == nil {
+			return nil, true
 		}
-		nq[i].Values = v
-	}
-	opt := nq != nil
-	if opt {
-		s = nq
+		if ok {
+			realloc()
+			s[i].Values = v
+		}
+		switch s[i].Values.(type) {
+		case Fixed:
+			realloc()
+			s[sw], s[i] = s[i], s[sw]
+			sw++
+		}
 	}
 	return s, opt
 }
 
-// aka HasA
+// QuadDirection extracts a given direction from all quads in source. Similar to HasA iterator.
 type QuadDirection struct {
 	Dir   quad.Direction
 	Quads Shape
@@ -276,6 +352,29 @@ func (s QuadDirection) Optimize(qs graph.QuadStore) (Shape, bool) {
 		return q[0].Values, true
 	}
 	var (
+		tags  map[string]graph.Value
+		nquad Quads
+	)
+	for i, f := range q {
+		if ft, ok := f.Values.(FixedTags); ok {
+			if tags == nil {
+				tags = make(map[string]graph.Value)
+				nquad = make([]QuadFilter, len(q))
+				copy(nquad, q)
+				q = nquad
+			}
+			q[i].Values = ft.On
+			for k, v := range ft.Tags {
+				tags[k] = v
+			}
+		}
+	}
+	if tags != nil {
+		// re-run optimization without fixed tags
+		ns, _ := QuadDirection{Dir: s.Dir, Quads: q}.Optimize(qs)
+		return FixedTags{On: ns, Tags: tags}, true
+	}
+	var (
 		filt map[quad.Direction]graph.Value
 		save map[quad.Direction][]string
 		n    int
@@ -301,22 +400,49 @@ func (s QuadDirection) Optimize(qs graph.QuadStore) (Shape, bool) {
 		}
 	}
 	if n == len(q) {
-		return QuadsAct{
+		ns, _ := QuadsAct{
 			Result: s.Dir,
 			Filter: filt,
 			Save:   save,
-		}, true
+		}.Optimize(qs)
+		return ns, true
 	}
 	// TODO
 	return s, opt
 }
 
+// QuadsAct represents a set of actions that can be done to a set of quads in a single scan pass.
+// It filters quads according to Filter field (equivalent of LinksTo), tags directions using tags in Save field
+// and returns a specified quad direction as result of the iterator (equivalent of HasA).
+// Optionally, Size field may be set to indicate an approximate number of quads that will be returned by this query.
 type QuadsAct struct {
+	Size   int64 // approximate size; zero means undefined
 	Result quad.Direction
 	Save   map[quad.Direction][]string
 	Filter map[quad.Direction]graph.Value
 }
 
+func (s QuadsAct) Clone() QuadsAct {
+	if n := len(s.Save); n != 0 {
+		s2 := make(map[quad.Direction][]string, n)
+		for k, v := range s.Save {
+			s2[k] = v
+		}
+		s.Save = s2
+	} else {
+		s.Save = nil
+	}
+	if n := len(s.Filter); n != 0 {
+		f2 := make(map[quad.Direction]graph.Value, n)
+		for k, v := range s.Filter {
+			f2[k] = v
+		}
+		s.Filter = f2
+	} else {
+		s.Filter = nil
+	}
+	return s
+}
 func (s QuadsAct) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	q := make(Quads, 0, len(s.Save)+len(s.Filter))
 	for dir, val := range s.Filter {
@@ -329,9 +455,42 @@ func (s QuadsAct) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	return h.BuildIterator(qs)
 }
 func (s QuadsAct) Optimize(qs graph.QuadStore) (Shape, bool) {
-	return s, false
+	ind, ok := qs.(QuadIndexer)
+	if !ok {
+		return s, false
+	}
+	if s.Size > 0 {
+		return s, false
+	}
+	sz, exact := ind.SizeOfIndex(s.Filter)
+	if !exact {
+		return s, false
+	}
+	s.Size = sz
+	if sz == 0 {
+		return nil, true
+	} else if sz == 1 {
+		if q, ok := ind.LookupQuadIndex(s.Result, s.Filter); ok {
+			fx := Fixed{q.Get(s.Result)}
+			if len(s.Save) == 0 {
+				return fx, true
+			}
+			ft := FixedTags{On: fx, Tags: make(map[string]graph.Value)}
+			for d, tags := range s.Save {
+				for _, t := range tags {
+					ft.Tags[t] = q.Get(d)
+				}
+			}
+			return ft, true
+		}
+	}
+	if sz < int64(MaterializeThreshold) {
+		return Materialize{Values: s, Size: int(sz)}, true
+	}
+	return s, true
 }
 
+// One checks if Shape represents a single fixed value and returns it.
 func One(s Shape) (graph.Value, bool) {
 	switch s := s.(type) {
 	case Fixed:
@@ -342,6 +501,7 @@ func One(s Shape) (graph.Value, bool) {
 	return nil, false
 }
 
+// Fixed is a static set of nodes.
 type Fixed []graph.Value
 
 func (s Fixed) BuildIterator(qs graph.QuadStore) graph.Iterator {
@@ -361,6 +521,47 @@ func (s Fixed) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, false
 }
 
+// FixedTags adds a set of fixed tag values to query results. It does not affect query execution in any other way.
+//
+// Shape implementations should try to push these objects up the tree during optimization process.
+type FixedTags struct {
+	Tags map[string]graph.Value
+	On   Shape
+}
+
+func (s FixedTags) BuildIterator(qs graph.QuadStore) graph.Iterator {
+	if IsNull(s.On) {
+		return iterator.NewNull()
+	}
+	it := s.On.BuildIterator(qs)
+	tg := it.Tagger()
+	for k, v := range s.Tags {
+		tg.AddFixed(k, v)
+	}
+	return it
+}
+func (s FixedTags) Optimize(qs graph.QuadStore) (Shape, bool) {
+	if IsNull(s.On) {
+		return nil, true
+	}
+	var opt bool
+	s.On, opt = s.On.Optimize(qs)
+	if len(s.Tags) == 0 {
+		return s.On, true
+	} else if s2, ok := s.On.(FixedTags); ok {
+		tags := make(map[string]graph.Value, len(s.Tags)+len(s2.Tags))
+		for k, v := range s.Tags {
+			tags[k] = v
+		}
+		for k, v := range s2.Tags {
+			tags[k] = v
+		}
+		return FixedTags{On: s2.On, Tags: tags}, true
+	}
+	return s, opt
+}
+
+// Lookup is a static set of values that must be resolved to nodes by QuadStore.
 type Lookup []quad.Value
 
 func (s Lookup) resolve(qs graph.QuadStore) Shape {
@@ -384,9 +585,54 @@ func (s Lookup) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	return f.BuildIterator(qs)
 }
 func (s Lookup) Optimize(qs graph.QuadStore) (Shape, bool) {
+	if qs == nil {
+		return s, false
+	}
 	return s.resolve(qs), true
 }
 
+var MaterializeThreshold = 100
+
+// Materialize loads results of sub-query into memory during execution to speedup iteration.
+type Materialize struct {
+	Size   int // approximate size; zero means undefined
+	Values Shape
+}
+
+func (s Materialize) BuildIterator(qs graph.QuadStore) graph.Iterator {
+	if IsNull(s.Values) {
+		return iterator.NewNull()
+	}
+	it := s.Values.BuildIterator(qs)
+	return iterator.NewMaterializeWithSize(it, int64(s.Size))
+}
+func (s Materialize) Optimize(qs graph.QuadStore) (Shape, bool) {
+	if IsNull(s.Values) {
+		return nil, true
+	}
+	return s, false
+}
+
+func clearFixedTags(arr []Shape) ([]Shape, map[string]graph.Value) {
+	var tags map[string]graph.Value
+	for i := 0; i < len(arr); i++ {
+		if ft, ok := arr[i].(FixedTags); ok {
+			if tags == nil {
+				tags = make(map[string]graph.Value)
+				na := make([]Shape, len(arr))
+				copy(na, arr)
+				arr = na
+			}
+			arr[i] = ft.On
+			for k, v := range ft.Tags {
+				tags[k] = v
+			}
+		}
+	}
+	return arr, tags
+}
+
+// Intersect computes an intersection of nodes between multiple queries. Similar to And iterator.
 type Intersect []Shape
 
 func (s Intersect) BuildIterator(qs graph.QuadStore) graph.Iterator {
@@ -428,6 +674,10 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 		}
 		s[i] = v
 	}
+	if arr, ft := clearFixedTags([]Shape(s)); ft != nil {
+		ns, _ := FixedTags{On: Intersect(arr), Tags: ft}.Optimize(qs)
+		return ns, true
+	}
 	var (
 		quads Quads
 		fixed []Fixed
@@ -442,7 +692,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 		v--
 		*i = v
 	}
-	// second pass - remove AllNodes, merge Quads, merge Fixed, merge Intersects
+	// second pass - remove AllNodes, merge Quads, collect Fixed, merge Intersects
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch c := c.(type) {
@@ -472,7 +722,33 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 		opt = opt || qopt
 		s = append(s, nq)
 	}
-	if len(fixed) != 0 { // TODO: intersect fixed
+	if len(fixed) == 1 {
+		fix := fixed[0]
+		if len(s) == 1 {
+			// try to push fixed down the tree
+			switch sf := s[0].(type) {
+			case QuadsAct:
+				if len(fix) == 1 {
+					fv := fix[0]
+					if v := sf.Filter[sf.Result]; v != nil {
+						if graph.ToKey(v) != graph.ToKey(fv) {
+							return nil, true
+						} else {
+							return sf, true
+						}
+					}
+					sf = sf.Clone()
+					sf.Filter[sf.Result] = fv
+					sf.Size = 0
+					ns, _ := sf.Optimize(qs)
+					return ns, true
+				}
+			}
+		}
+		s = append(s, nil)
+		copy(s[1:], s)
+		s[0] = fix
+	} else if len(fixed) > 1 { // TODO: intersect fixed
 		ns := make(Intersect, len(s)+len(fixed))
 		for i, f := range fixed {
 			ns[i] = f
@@ -489,6 +765,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
+// Union joins results of multiple queries together. It does not make results unique.
 type Union []Shape
 
 func (s Union) BuildIterator(qs graph.QuadStore) graph.Iterator {
@@ -524,6 +801,10 @@ func (s Union) Optimize(qs graph.QuadStore) (Shape, bool) {
 		opt = true
 		s[i] = v
 	}
+	if arr, ft := clearFixedTags([]Shape(s)); ft != nil {
+		ns, _ := FixedTags{On: Union(arr), Tags: ft}.Optimize(qs)
+		return ns, true
+	}
 	// second pass - remove Null
 	for i := 0; i < len(s); i++ {
 		c := s[i]
@@ -542,10 +823,11 @@ func (s Union) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
+// Page provides a simple for of pagination. Can be used to skip or limit results.
 type Page struct {
 	From  Shape
 	Skip  int64
-	Limit int64
+	Limit int64 // zero means unlimited
 }
 
 func (s Page) BuildIterator(qs graph.QuadStore) graph.Iterator {
@@ -576,6 +858,7 @@ func (s Page) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, false
 }
 
+// Unique makes query results unique.
 type Unique struct {
 	From Shape
 }
@@ -599,6 +882,7 @@ func (s Unique) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
+// Save tags a results of query with provided tags.
 type Save struct {
 	From Shape
 	Tags []string
@@ -609,8 +893,9 @@ func (s Save) BuildIterator(qs graph.QuadStore) graph.Iterator {
 		return iterator.NewNull()
 	}
 	it := s.From.BuildIterator(qs)
+	tg := it.Tagger()
 	if len(s.Tags) != 0 {
-		it.Tagger().Add(s.Tags...)
+		tg.Add(s.Tags...)
 	}
 	return it
 }
@@ -628,6 +913,8 @@ func (s Save) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
+// Optional makes a query execution optional. The query can only produce tagged results,
+// since it's value is not used to compute intersection.
 type Optional struct {
 	From Shape
 }
