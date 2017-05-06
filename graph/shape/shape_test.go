@@ -118,6 +118,33 @@ var optimizeCases = []struct {
 		opt:    true,
 		expect: Fixed{1},
 	},
+	{ // pop fixed tags to the top of the tree
+		from: QuadDirection{Dir: quad.Subject, Quads: Quads{
+			QuadFilter{Dir: quad.Predicate, Values: Intersect{
+				FixedTags{
+					Tags: map[string]graph.Value{"foo": 1},
+					On: QuadDirection{Dir: quad.Subject,
+						Quads: Quads{
+							QuadFilter{Dir: quad.Object, Values: FixedTags{
+								Tags: map[string]graph.Value{"bar": 2},
+								On:   Fixed{3},
+							}},
+						},
+					},
+				},
+			}},
+		}},
+		opt: true,
+		expect: FixedTags{
+			Tags: map[string]graph.Value{"foo": 1, "bar": 2},
+			On: QuadDirection{Dir: quad.Subject, Quads: Quads{
+				QuadFilter{Dir: quad.Predicate, Values: QuadsAct{
+					Result: quad.Subject,
+					Filter: map[quad.Direction]graph.Value{quad.Object: 3},
+				}},
+			}},
+		},
+	},
 }
 
 type lookupQuadStore map[quad.Value]graph.Value
