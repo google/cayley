@@ -10,17 +10,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-func verifyNodes(nodes ...graph.Value) {
-	// FIXME: strong types for graph.Value
-	for _, v := range nodes {
-		if _, ok := v.(quad.Value); ok {
-			panic("use HasValues for quad.Value")
-		}
-	}
-}
-
 func StartNodes(nodes ...graph.Value) Path {
-	verifyNodes(nodes...)
 	var s Shape = AllNodes{}
 	if len(nodes) != 0 {
 		s = Fixed(nodes)
@@ -83,7 +73,6 @@ func (p Path) Is(vals ...graph.Value) Path {
 	if len(vals) == 0 {
 		return p
 	}
-	verifyNodes(vals...)
 	p.root = intersect(p.root, Fixed(vals))
 	return p
 }
@@ -351,7 +340,6 @@ func (p Path) Has(via interface{}, rev bool, nodes ...graph.Value) Path {
 	if len(nodes) != 0 {
 		ends = Fixed(nodes)
 	}
-	verifyNodes(nodes...)
 	p.root = Has(p.root, pred, ends, rev)
 	return p
 }
