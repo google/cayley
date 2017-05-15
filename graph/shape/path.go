@@ -19,7 +19,7 @@ func verifyNodes(nodes ...graph.Value) {
 	}
 }
 
-func Start(nodes ...graph.Value) Path {
+func StartNodes(nodes ...graph.Value) Path {
 	verifyNodes(nodes...)
 	var s Shape = AllNodes{}
 	if len(nodes) != 0 {
@@ -28,7 +28,7 @@ func Start(nodes ...graph.Value) Path {
 	return StartFrom(s)
 }
 
-func StartValues(vals ...quad.Value) Path {
+func Start(vals ...quad.Value) Path {
 	var s Shape = AllNodes{}
 	if len(vals) != 0 {
 		s = Lookup(vals)
