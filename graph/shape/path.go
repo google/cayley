@@ -96,25 +96,26 @@ func (p Path) IsValue(vals ...quad.Value) Path {
 	return p
 }
 
-func (p Path) Regexp(pattern *regexp.Regexp) Path {
-	p.root = Regexp{From: p.root, Re: pattern, Refs: false}
+func (p Path) Filter(filters ...ValueFilter) Path {
+	if fl, ok := p.root.(Filter); ok {
+		fl.Filters = append(fl.Filters, filters...)
+		p.root = fl
+	} else {
+		p.root = Filter{From: p.root, Filters: filters}
+	}
 	return p
+}
+
+func (p Path) Regexp(pattern *regexp.Regexp) Path {
+	return p.Filter(Regexp{Re: pattern, Refs: false})
 }
 
 func (p Path) RegexpWithRefs(pattern *regexp.Regexp) Path {
-	p.root = Regexp{From: p.root, Re: pattern, Refs: true}
-	return p
+	return p.Filter(Regexp{Re: pattern, Refs: true})
 }
 
-func (p Path) Filter(op iterator.Operator, node quad.Value) Path {
-	f := ValueFilter{Op: op, Val: node}
-	if fl, ok := p.root.(Filter); ok {
-		fl.Filters = append(fl.Filters, f)
-		p.root = fl
-	} else {
-		p.root = Filter{From: p.root, Filters: []ValueFilter{f}}
-	}
-	return p
+func (p Path) Compare(op iterator.Operator, node quad.Value) Path {
+	return p.Filter(Comparison{Op: op, Val: node})
 }
 
 func (p Path) Tag(tags ...string) Path {

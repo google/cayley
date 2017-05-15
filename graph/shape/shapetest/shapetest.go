@@ -144,7 +144,7 @@ var cases = []struct {
 	},
 	{
 		message: "use in with filter",
-		path:    StartValues(vBob).In(vFollows).Filter(iterator.CompareGT, quad.IRI("c")),
+		path:    StartValues(vBob).In(vFollows).Compare(iterator.CompareGT, quad.IRI("c")),
 		expect:  []quad.Value{vCharlie, vDani},
 	},
 	{
