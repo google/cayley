@@ -147,9 +147,8 @@ func (s Except) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
-type ValueFilter struct {
-	Op  iterator.Operator
-	Val quad.Value
+type ValueFilter interface {
+	BuildIterator(qs graph.QuadStore, it graph.Iterator) graph.Iterator
 }
 
 // Filter filters all values from the source using a list of operations.
@@ -164,7 +163,7 @@ func (s Filter) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	it := s.From.BuildIterator(qs)
 	for _, f := range s.Filters {
-		it = iterator.NewComparison(it, f.Op, f.Val, qs)
+		it = f.BuildIterator(qs, it)
 	}
 	return it
 }
@@ -182,36 +181,28 @@ func (s Filter) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
+var _ ValueFilter = Comparison{}
+
+type Comparison struct {
+	Op  iterator.Operator
+	Val quad.Value
+}
+
+func (f Comparison) BuildIterator(qs graph.QuadStore, it graph.Iterator) graph.Iterator {
+	return iterator.NewComparison(it, f.Op, f.Val, qs)
+}
+
+var _ ValueFilter = Regexp{}
+
 type Regexp struct {
-	From Shape
 	Re   *regexp.Regexp
 	Refs bool
 }
 
-func (s Regexp) BuildIterator(qs graph.QuadStore) graph.Iterator {
-	if IsNull(s.From) {
-		return iterator.NewNull()
-	}
-	it := s.From.BuildIterator(qs)
-	if s.Re == nil {
-		return it
-	}
-	rit := iterator.NewRegex(it, s.Re, qs)
-	rit.AllowRefs(s.Refs)
+func (f Regexp) BuildIterator(qs graph.QuadStore, it graph.Iterator) graph.Iterator {
+	rit := iterator.NewRegex(it, f.Re, qs)
+	rit.AllowRefs(f.Refs)
 	return rit
-}
-func (s Regexp) Optimize(qs graph.QuadStore) (Shape, bool) {
-	if IsNull(s.From) {
-		return nil, true
-	}
-	var opt bool
-	s.From, opt = s.From.Optimize(qs)
-	if IsNull(s.From) {
-		return nil, true
-	} else if s.Re == nil {
-		return s.From, true
-	}
-	return s, opt
 }
 
 // Count returns a count of objects in source as a single value. It always returns exactly one value.
@@ -648,8 +639,8 @@ func (s Intersect) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewAnd(qs, sub...)
 }
-func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
-	var opt bool
+func (s Intersect) Optimize(qs graph.QuadStore) (sout Shape, opt bool) {
+	// function to lazily reallocate a copy of Intersect slice
 	realloc := func() {
 		if !opt {
 			arr := make(Intersect, len(s))
@@ -657,7 +648,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 			s = arr
 		}
 	}
-	// optimize subiterators, return empty set if Null is found
+	// optimize sub-iterators, return empty set if Null is found
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if IsNull(c) {
@@ -679,8 +670,9 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 		return ns, true
 	}
 	var (
-		quads Quads
-		fixed []Fixed
+		fixed []Fixed  // we will collect all Fixed, and will place it as a first iterator
+		tags  []string // if we find a Save inside, we will push it outside of Intersect
+		quads Quads    // also, collect all quad filters into a single set
 	)
 	remove := func(i *int, o bool) {
 		realloc()
@@ -692,7 +684,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 		v--
 		*i = v
 	}
-	// second pass - remove AllNodes, merge Quads, collect Fixed, merge Intersects
+	// second pass - remove AllNodes, merge Quads, collect Fixed, collect Save, merge Intersects
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch c := c.(type) {
@@ -712,7 +704,25 @@ func (s Intersect) Optimize(qs graph.QuadStore) (Shape, bool) {
 		case Intersect:
 			remove(&i, true)
 			s = append(s, c...)
+		case Save:
+			realloc()
+			opt = true
+			tags = append(tags, c.Tags...)
+			s[i] = c.From
+			i--
 		}
+	}
+	if len(tags) != 0 {
+		// don't forget to move Save outside of Intersect
+		defer func() {
+			if IsNull(sout) {
+				return
+			}
+			sv := Save{From: sout, Tags: tags}
+			var topt bool
+			sout, topt = sv.Optimize(qs)
+			opt = opt || topt
+		}()
 	}
 	if quads != nil {
 		nq, qopt := quads.Optimize(qs)
