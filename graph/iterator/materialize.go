@@ -184,7 +184,7 @@ func (it *Materialize) Stats() graph.IteratorStats {
 		exact bool
 	)
 	if it.expectSize > 0 {
-		size, exact = it.expectSize, true
+		size, exact = it.expectSize, false
 	} else {
 		size, exact = it.Size()
 	}
