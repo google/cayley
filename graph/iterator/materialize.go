@@ -22,7 +22,7 @@ import (
 	"github.com/cayleygraph/cayley/graph"
 )
 
-var abortMaterializeAt = 1000
+const MaterializeLimit = 1000
 
 type result struct {
 	id   graph.Value
@@ -52,7 +52,7 @@ func NewMaterialize(sub graph.Iterator) *Materialize {
 func NewMaterializeWithSize(sub graph.Iterator, size int64) *Materialize {
 	return &Materialize{
 		uid:         NextUID(),
-		expectSize: size,
+		expectSize:  size,
 		containsMap: make(map[interface{}]int),
 		subIt:       sub,
 		index:       -1,
@@ -180,7 +180,7 @@ func (it *Materialize) Size() (int64, bool) {
 func (it *Materialize) Stats() graph.IteratorStats {
 	overhead := int64(2)
 	var (
-		size int64
+		size  int64
 		exact bool
 	)
 	if it.expectSize > 0 {
@@ -271,7 +271,7 @@ func (it *Materialize) materializeSet() {
 	i := 0
 	for it.subIt.Next() {
 		i++
-		if i > abortMaterializeAt {
+		if i > MaterializeLimit {
 			it.aborted = true
 			break
 		}
@@ -288,7 +288,7 @@ func (it *Materialize) materializeSet() {
 		it.actualSize += 1
 		for it.subIt.NextPath() {
 			i++
-			if i > abortMaterializeAt {
+			if i > MaterializeLimit {
 				it.aborted = true
 				break
 			}
