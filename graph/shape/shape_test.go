@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/cayleygraph/cayley/graph"
+	"github.com/cayleygraph/cayley/graph/graphmock"
 	. "github.com/cayleygraph/cayley/graph/shape"
 	"github.com/cayleygraph/cayley/graph/shape/shapetest"
 	"github.com/cayleygraph/cayley/quad"
@@ -28,14 +29,15 @@ func TestPaths(t *testing.T) {
 	shapetest.RunTestShapes(t, nil)
 }
 
-type intVal int
-func (v intVal) Key() interface{} { return v }
+func intVal(v int) graph.Value {
+	return graphmock.IntVal(v)
+}
 
 var optimizeCases = []struct {
 	from   Shape
 	expect Shape
 	opt    bool
-	qs     lookupQuadStore
+	qs     graphmock.Lookup
 }{
 	{
 		from:   AllNodes{},
@@ -56,7 +58,7 @@ var optimizeCases = []struct {
 			{Dir: quad.Subject, Values: Fixed{intVal(1)}},
 			{Dir: quad.Object, Values: Fixed{intVal(2)}},
 		},
-		qs: lookupQuadStore{
+		qs: graphmock.Lookup{
 			quad.IRI("bob"):   intVal(1),
 			quad.IRI("alice"): intVal(2),
 		},
@@ -76,7 +78,7 @@ var optimizeCases = []struct {
 			QuadsAct{Result: quad.Subject},
 			Unique{QuadsAct{Result: quad.Object}},
 		},
-		qs: lookupQuadStore{
+		qs: graphmock.Lookup{
 			quad.IRI("alice"): intVal(1),
 		},
 	},
@@ -167,51 +169,6 @@ var optimizeCases = []struct {
 			}},
 		},
 	},
-}
-
-type lookupQuadStore map[quad.Value]graph.Value
-
-func (lookupQuadStore) ApplyDeltas(_ []graph.Delta, _ graph.IgnoreOpts) error {
-	panic("not implemented")
-}
-func (lookupQuadStore) Quad(_ graph.Value) quad.Quad {
-	panic("not implemented")
-}
-func (lookupQuadStore) QuadIterator(_ quad.Direction, _ graph.Value) graph.Iterator {
-	panic("not implemented")
-}
-func (lookupQuadStore) NodesAllIterator() graph.Iterator {
-	panic("not implemented")
-}
-func (lookupQuadStore) QuadsAllIterator() graph.Iterator {
-	panic("not implemented")
-}
-func (qs lookupQuadStore) ValueOf(v quad.Value) graph.Value {
-	return qs[v]
-}
-func (lookupQuadStore) NameOf(_ graph.Value) quad.Value {
-	panic("not implemented")
-}
-func (lookupQuadStore) Size() int64 {
-	panic("not implemented")
-}
-func (lookupQuadStore) Horizon() graph.PrimaryKey {
-	panic("not implemented")
-}
-func (lookupQuadStore) FixedIterator() graph.FixedIterator {
-	panic("not implemented")
-}
-func (lookupQuadStore) OptimizeIterator(_ graph.Iterator) (graph.Iterator, bool) {
-	panic("not implemented")
-}
-func (lookupQuadStore) Close() error {
-	panic("not implemented")
-}
-func (lookupQuadStore) QuadDirection(_ graph.Value, _ quad.Direction) graph.Value {
-	panic("not implemented")
-}
-func (lookupQuadStore) Type() string {
-	panic("not implemented")
 }
 
 func TestOptimize(t *testing.T) {
