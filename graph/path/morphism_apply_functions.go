@@ -65,7 +65,11 @@ func regexMorphism(pattern *regexp.Regexp, refs bool) morphism {
 		Name:     "regex",
 		Reversal: func(ctx *pathContext) (morphism, *pathContext) { return regexMorphism(pattern, refs), ctx },
 		Apply: func(in shape.Shape, ctx *pathContext) (shape.Shape, *pathContext) {
-			return shape.Regexp{From: in, Re: pattern, Refs: refs}, ctx
+			return shape.Filter{From:in,
+				Filters: []shape.ValueFilter{
+					shape.Regexp{Re: pattern, Refs: refs},
+				},
+			}, ctx
 		},
 	}
 }
@@ -99,7 +103,7 @@ func cmpMorphism(op iterator.Operator, node quad.Value) morphism {
 			return shape.Filter{
 				From: in,
 				Filters: []shape.ValueFilter{
-					{Op: op, Val: node},
+					shape.Comparison{Op: op, Val: node},
 				},
 			}, ctx
 		},

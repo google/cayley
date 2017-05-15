@@ -77,6 +77,23 @@ var optimizeCases = []struct {
 			quad.IRI("alice"): 1,
 		},
 	},
+	{ // push Save out of intersect
+		from: Intersect{
+			Save{
+				Tags: []string{"id"},
+				From: QuadDirection{Dir: quad.Subject, Quads: Quads{}},
+			},
+			Unique{QuadDirection{Dir: quad.Object, Quads: Quads{}}},
+		},
+		opt: true,
+		expect: Save{
+			Tags: []string{"id"},
+			From: Intersect{
+				QuadsAct{Result: quad.Subject},
+				Unique{QuadsAct{Result: quad.Object}},
+			},
+		},
+	},
 	{ // collapse empty set
 		from: Intersect{Quads{
 			{Dir: quad.Subject, Values: Optional{Union{
@@ -101,10 +118,12 @@ var optimizeCases = []struct {
 			Fixed{2},
 		},
 		opt: true,
-		expect: Intersect{
-			Fixed{1, 2},
-			Fixed{2},
-			Save{From: AllNodes{}, Tags: []string{"all"}},
+		expect: Save{
+			From: Intersect{
+				Fixed{1, 2},
+				Fixed{2},
+			},
+			Tags: []string{"all"},
 		},
 	},
 	{ // remove HasA-LinksTo pairs
