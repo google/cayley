@@ -210,15 +210,6 @@ type Count struct {
 	Values Shape
 }
 
-var _ graph.PreFetchedValue = fetchedValue{}
-
-type fetchedValue struct {
-	Val quad.Value
-}
-
-func (v fetchedValue) IsNode() bool       { return true }
-func (v fetchedValue) NameOf() quad.Value { return v.Val }
-
 func (s Count) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	var it graph.Iterator
 	if IsNull(s.Values) {
@@ -230,12 +221,12 @@ func (s Count) BuildIterator(qs graph.QuadStore) graph.Iterator {
 }
 func (s Count) Optimize(qs graph.QuadStore) (Shape, bool) {
 	if IsNull(s.Values) {
-		return Fixed{fetchedValue{quad.Int(0)}}, true
+		return Fixed{graph.PreFetched(quad.Int(0))}, true
 	}
 	var opt bool
 	s.Values, opt = s.Values.Optimize(qs)
 	if IsNull(s.Values) {
-		return Fixed{fetchedValue{quad.Int(0)}}, true
+		return Fixed{graph.PreFetched(quad.Int(0))}, true
 	}
 	// TODO: ask QS to estimate size - if it exact, then we can use it
 	return s, opt

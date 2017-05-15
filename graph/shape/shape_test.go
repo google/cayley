@@ -28,6 +28,9 @@ func TestPaths(t *testing.T) {
 	shapetest.RunTestShapes(t, nil)
 }
 
+type intVal int
+func (v intVal) Key() interface{} { return v }
+
 var optimizeCases = []struct {
 	from   Shape
 	expect Shape
@@ -50,12 +53,12 @@ var optimizeCases = []struct {
 		},
 		opt: true,
 		expect: Quads{
-			{Dir: quad.Subject, Values: Fixed{1}},
-			{Dir: quad.Object, Values: Fixed{2}},
+			{Dir: quad.Subject, Values: Fixed{intVal(1)}},
+			{Dir: quad.Object, Values: Fixed{intVal(2)}},
 		},
 		qs: lookupQuadStore{
-			quad.IRI("bob"):   1,
-			quad.IRI("alice"): 2,
+			quad.IRI("bob"):   intVal(1),
+			quad.IRI("alice"): intVal(2),
 		},
 	},
 	{ // intersect nodes, remove all, join intersects
@@ -69,12 +72,12 @@ var optimizeCases = []struct {
 		},
 		opt: true,
 		expect: Intersect{
-			Fixed{1},
+			Fixed{intVal(1)},
 			QuadsAct{Result: quad.Subject},
 			Unique{QuadsAct{Result: quad.Object}},
 		},
 		qs: lookupQuadStore{
-			quad.IRI("alice"): 1,
+			quad.IRI("alice"): intVal(1),
 		},
 	},
 	{ // push Save out of intersect
@@ -113,15 +116,15 @@ var optimizeCases = []struct {
 	{ // remove "all nodes" in intersect, merge Fixed and order them first
 		from: Intersect{
 			AllNodes{},
-			Fixed{1, 2},
+			Fixed{intVal(1), intVal(2)},
 			Save{From: AllNodes{}, Tags: []string{"all"}},
-			Fixed{2},
+			Fixed{intVal(2)},
 		},
 		opt: true,
 		expect: Save{
 			From: Intersect{
-				Fixed{1, 2},
-				Fixed{2},
+				Fixed{intVal(1), intVal(2)},
+				Fixed{intVal(2)},
 			},
 			Tags: []string{"all"},
 		},
@@ -131,22 +134,22 @@ var optimizeCases = []struct {
 			Dir: quad.Subject,
 			Quads: Quads{{
 				Dir:    quad.Subject,
-				Values: Fixed{1},
+				Values: Fixed{intVal(1)},
 			}},
 		},
 		opt:    true,
-		expect: Fixed{1},
+		expect: Fixed{intVal(1)},
 	},
 	{ // pop fixed tags to the top of the tree
 		from: QuadDirection{Dir: quad.Subject, Quads: Quads{
 			QuadFilter{Dir: quad.Predicate, Values: Intersect{
 				FixedTags{
-					Tags: map[string]graph.Value{"foo": 1},
+					Tags: map[string]graph.Value{"foo": intVal(1)},
 					On: QuadDirection{Dir: quad.Subject,
 						Quads: Quads{
 							QuadFilter{Dir: quad.Object, Values: FixedTags{
-								Tags: map[string]graph.Value{"bar": 2},
-								On:   Fixed{3},
+								Tags: map[string]graph.Value{"bar": intVal(2)},
+								On:   Fixed{intVal(3)},
 							}},
 						},
 					},
@@ -155,11 +158,11 @@ var optimizeCases = []struct {
 		}},
 		opt: true,
 		expect: FixedTags{
-			Tags: map[string]graph.Value{"foo": 1, "bar": 2},
+			Tags: map[string]graph.Value{"foo": intVal(1), "bar": intVal(2)},
 			On: QuadDirection{Dir: quad.Subject, Quads: Quads{
 				QuadFilter{Dir: quad.Predicate, Values: QuadsAct{
 					Result: quad.Subject,
-					Filter: map[quad.Direction]graph.Value{quad.Object: 3},
+					Filter: map[quad.Direction]graph.Value{quad.Object: intVal(3)},
 				}},
 			}},
 		},
