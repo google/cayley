@@ -66,17 +66,17 @@ var optimizeCases = []struct {
 	{ // intersect nodes, remove all, join intersects
 		from: Intersect{
 			AllNodes{},
-			QuadDirection{Dir: quad.Subject, Quads: Quads{}},
+			NodesFrom{Dir: quad.Subject, Quads: Quads{}},
 			Intersect{
 				Lookup{quad.IRI("alice")},
-				Unique{QuadDirection{Dir: quad.Object, Quads: Quads{}}},
+				Unique{NodesFrom{Dir: quad.Object, Quads: Quads{}}},
 			},
 		},
 		opt: true,
 		expect: Intersect{
 			Fixed{intVal(1)},
-			QuadsAct{Result: quad.Subject},
-			Unique{QuadsAct{Result: quad.Object}},
+			QuadsAction{Result: quad.Subject},
+			Unique{QuadsAction{Result: quad.Object}},
 		},
 		qs: graphmock.Lookup{
 			quad.IRI("alice"): intVal(1),
@@ -86,23 +86,23 @@ var optimizeCases = []struct {
 		from: Intersect{
 			Save{
 				Tags: []string{"id"},
-				From: QuadDirection{Dir: quad.Subject, Quads: Quads{}},
+				From: NodesFrom{Dir: quad.Subject, Quads: Quads{}},
 			},
-			Unique{QuadDirection{Dir: quad.Object, Quads: Quads{}}},
+			Unique{NodesFrom{Dir: quad.Object, Quads: Quads{}}},
 		},
 		opt: true,
 		expect: Save{
 			Tags: []string{"id"},
 			From: Intersect{
-				QuadsAct{Result: quad.Subject},
-				Unique{QuadsAct{Result: quad.Object}},
+				QuadsAction{Result: quad.Subject},
+				Unique{QuadsAction{Result: quad.Object}},
 			},
 		},
 	},
 	{ // collapse empty set
 		from: Intersect{Quads{
 			{Dir: quad.Subject, Values: Optional{Union{
-				Unique{QuadDirection{
+				Unique{NodesFrom{
 					Dir: quad.Predicate,
 					Quads: Intersect{Quads{
 						{Dir: quad.Object,
@@ -132,7 +132,7 @@ var optimizeCases = []struct {
 		},
 	},
 	{ // remove HasA-LinksTo pairs
-		from: QuadDirection{
+		from: NodesFrom{
 			Dir: quad.Subject,
 			Quads: Quads{{
 				Dir:    quad.Subject,
@@ -143,11 +143,11 @@ var optimizeCases = []struct {
 		expect: Fixed{intVal(1)},
 	},
 	{ // pop fixed tags to the top of the tree
-		from: QuadDirection{Dir: quad.Subject, Quads: Quads{
+		from: NodesFrom{Dir: quad.Subject, Quads: Quads{
 			QuadFilter{Dir: quad.Predicate, Values: Intersect{
 				FixedTags{
 					Tags: map[string]graph.Value{"foo": intVal(1)},
-					On: QuadDirection{Dir: quad.Subject,
+					On: NodesFrom{Dir: quad.Subject,
 						Quads: Quads{
 							QuadFilter{Dir: quad.Object, Values: FixedTags{
 								Tags: map[string]graph.Value{"bar": intVal(2)},
@@ -161,8 +161,8 @@ var optimizeCases = []struct {
 		opt: true,
 		expect: FixedTags{
 			Tags: map[string]graph.Value{"foo": intVal(1), "bar": intVal(2)},
-			On: QuadDirection{Dir: quad.Subject, Quads: Quads{
-				QuadFilter{Dir: quad.Predicate, Values: QuadsAct{
+			On: NodesFrom{Dir: quad.Subject, Quads: Quads{
+				QuadFilter{Dir: quad.Predicate, Values: QuadsAction{
 					Result: quad.Subject,
 					Filter: map[quad.Direction]graph.Value{quad.Object: intVal(3)},
 				}},

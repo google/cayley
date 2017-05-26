@@ -199,7 +199,7 @@ func buildOut(from, via, labels Shape, tags []string, in bool) Shape {
 			})
 		}
 	}
-	return QuadDirection{Quads: quads, Dir: goal}
+	return NodesFrom{Quads: quads, Dir: goal}
 }
 
 func Out(from, via, labels Shape, tags ...string) Shape {
@@ -229,7 +229,7 @@ func Predicates(from Shape, in bool) Shape {
 	if in {
 		dir = quad.Object
 	}
-	return Unique{QuadDirection{
+	return Unique{NodesFrom{
 		Quads: Quads{
 			{Dir: dir, Values: from},
 		},
@@ -264,7 +264,7 @@ func (p Path) Or(shape ...Shape) Path {
 	return p.Union(shape...)
 }
 func (p Path) Except(s Shape) Path {
-	p.root = Except{All: p.root, Nodes: s}
+	p.root = Except{From: p.root, Exclude: s}
 	return p
 }
 func (p Path) Unique() Path {
@@ -282,7 +282,7 @@ func SaveVia(from, via Shape, tag string, rev, opt bool) Shape {
 		start, goal = goal, start
 	}
 
-	var save Shape = QuadDirection{
+	var save Shape = NodesFrom{
 		Quads: Quads{
 			{Dir: goal, Values: nodes},
 			{Dir: quad.Predicate, Values: via},
@@ -329,7 +329,7 @@ func Has(from, via, nodes Shape, rev bool) Shape {
 	if len(quads) == 0 {
 		panic("empty has")
 	}
-	return intersect(from, QuadDirection{
+	return intersect(from, NodesFrom{
 		Quads: quads, Dir: start,
 	})
 }

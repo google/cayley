@@ -337,7 +337,7 @@ func exceptMorphism(p *Path) morphism {
 		Name:     "except",
 		Reversal: func(ctx *pathContext) (morphism, *pathContext) { return exceptMorphism(p), ctx },
 		Apply: func(in shape.Shape, ctx *pathContext) (shape.Shape, *pathContext) {
-			return join(in, shape.Except{All: shape.AllNodes{}, Nodes: p.Shape()}), ctx
+			return join(in, shape.Except{From: shape.AllNodes{}, Exclude: p.Shape()}), ctx
 		},
 	}
 }

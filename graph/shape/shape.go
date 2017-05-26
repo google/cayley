@@ -117,37 +117,37 @@ func (s AllNodes) Optimize(qs graph.QuadStore) (Shape, bool) {
 
 // Except excludes a set on nodes from a source. If source is nil, AllNodes is assumed.
 type Except struct {
-	Nodes Shape // nodes to exclude
-	All   Shape // a set of all nodes to exclude from; nil means AllNodes
+	Exclude Shape // nodes to exclude
+	From    Shape // a set of all nodes to exclude from; nil means AllNodes
 }
 
 func (s Except) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	var all graph.Iterator
-	if s.All != nil {
-		all = s.All.BuildIterator(qs)
+	if s.From != nil {
+		all = s.From.BuildIterator(qs)
 	} else {
 		all = qs.NodesAllIterator()
 	}
-	if IsNull(s.Nodes) {
+	if IsNull(s.Exclude) {
 		return all
 	}
-	return iterator.NewNot(s.Nodes.BuildIterator(qs), all)
+	return iterator.NewNot(s.Exclude.BuildIterator(qs), all)
 }
 func (s Except) Optimize(qs graph.QuadStore) (Shape, bool) {
-	nd, opt := s.Nodes.Optimize(qs)
+	nd, opt := s.Exclude.Optimize(qs)
 	if opt {
-		s.Nodes = nd
+		s.Exclude = nd
 	}
-	if s.All != nil {
-		nd, opta := s.All.Optimize(qs)
+	if s.From != nil {
+		nd, opta := s.From.Optimize(qs)
 		if opta {
-			s.All = nd
+			s.From = nd
 		}
 		opt = opt || opta
 	}
-	if IsNull(s.Nodes) {
+	if IsNull(s.Exclude) {
 		return AllNodes{}, true
-	} else if _, ok := s.Nodes.(AllNodes); ok {
+	} else if _, ok := s.Exclude.(AllNodes); ok {
 		return nil, true
 	}
 	return s, opt
@@ -248,7 +248,7 @@ type QuadFilter struct {
 	Values Shape
 }
 
-// not exposed to force to use Quads and group filters
+// buildIterator is not exposed to force to use Quads and group filters together.
 func (s QuadFilter) buildIterator(qs graph.QuadStore) graph.Iterator {
 	if s.Values == nil {
 		return iterator.NewNull()
@@ -262,10 +262,12 @@ func (s QuadFilter) buildIterator(qs graph.QuadStore) graph.Iterator {
 	return iterator.NewLinksTo(qs, sub, s.Dir)
 }
 
-// Quads is a selector of quads with a given set of constraints. Empty or nil Quads is equivalent to AllQuads.
+// Quads is a selector of quads with a given set of node constraints. Empty or nil Quads is equivalent to AllQuads.
 // Equivalent to And(AllQuads,LinksTo*) iterator tree.
 type Quads []QuadFilter
-
+func (s *Quads) Intersect(q ...QuadFilter) {
+	*s = append(*s, q...)
+}
 func (s Quads) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	if len(s) == 0 {
 		return qs.QuadsAllIterator()
@@ -314,13 +316,13 @@ func (s Quads) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
-// QuadDirection extracts a given direction from quads in source. Similar to HasA iterator.
-type QuadDirection struct {
+// NodesFrom extracts nodes on a given direction from source quads. Similar to HasA iterator.
+type NodesFrom struct {
 	Dir   quad.Direction
 	Quads Shape
 }
 
-func (s QuadDirection) BuildIterator(qs graph.QuadStore) graph.Iterator {
+func (s NodesFrom) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	if IsNull(s.Quads) {
 		return iterator.NewNull()
 	}
@@ -330,7 +332,7 @@ func (s QuadDirection) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewHasA(qs, sub, s.Dir)
 }
-func (s QuadDirection) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s NodesFrom) Optimize(qs graph.QuadStore) (Shape, bool) {
 	if IsNull(s.Quads) {
 		return nil, true
 	}
@@ -368,7 +370,7 @@ func (s QuadDirection) Optimize(qs graph.QuadStore) (Shape, bool) {
 	}
 	if tags != nil {
 		// re-run optimization without fixed tags
-		ns, _ := QuadDirection{Dir: s.Dir, Quads: q}.Optimize(qs)
+		ns, _ := NodesFrom{Dir: s.Dir, Quads: q}.Optimize(qs)
 		return FixedTags{On: ns, Tags: tags}, true
 	}
 	var (
@@ -402,7 +404,7 @@ func (s QuadDirection) Optimize(qs graph.QuadStore) (Shape, bool) {
 	if n == len(q) {
 		// if all filters were recognized we can merge this tree as a single iterator with multiple
 		// constraints and multiple save commands over the same set of quads
-		ns, _ := QuadsAct{
+		ns, _ := QuadsAction{
 			Result: s.Dir, // this is still a HasA, remember?
 			Filter: filt,
 			Save:   save,
@@ -413,18 +415,18 @@ func (s QuadDirection) Optimize(qs graph.QuadStore) (Shape, bool) {
 	return s, opt
 }
 
-// QuadsAct represents a set of actions that can be done to a set of quads in a single scan pass.
+// QuadsAction represents a set of actions that can be done to a set of quads in a single scan pass.
 // It filters quads according to Filter constraints (equivalent of LinksTo), tags directions using tags in Save field
 // and returns a specified quad direction as result of the iterator (equivalent of HasA).
 // Optionally, Size field may be set to indicate an approximate number of quads that will be returned by this query.
-type QuadsAct struct {
+type QuadsAction struct {
 	Size   int64 // approximate size; zero means undefined
 	Result quad.Direction
 	Save   map[quad.Direction][]string
 	Filter map[quad.Direction]graph.Value
 }
 
-func (s QuadsAct) Clone() QuadsAct {
+func (s QuadsAction) Clone() QuadsAction {
 	if n := len(s.Save); n != 0 {
 		s2 := make(map[quad.Direction][]string, n)
 		for k, v := range s.Save {
@@ -445,7 +447,7 @@ func (s QuadsAct) Clone() QuadsAct {
 	}
 	return s
 }
-func (s QuadsAct) BuildIterator(qs graph.QuadStore) graph.Iterator {
+func (s QuadsAction) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	q := make(Quads, 0, len(s.Save)+len(s.Filter))
 	for dir, val := range s.Filter {
 		q = append(q, QuadFilter{Dir: dir, Values: Fixed{val}})
@@ -453,10 +455,10 @@ func (s QuadsAct) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	for dir, tags := range s.Save {
 		q = append(q, QuadFilter{Dir: dir, Values: Save{From: AllNodes{}, Tags: tags}})
 	}
-	h := QuadDirection{Dir: s.Result, Quads: q}
+	h := NodesFrom{Dir: s.Result, Quads: q}
 	return h.BuildIterator(qs)
 }
-func (s QuadsAct) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s QuadsAction) Optimize(qs graph.QuadStore) (Shape, bool) {
 	// if quadstore has stats for quad indexes we can use them to do some optimizations
 	ind, ok := qs.(QuadIndexer)
 	if !ok {
@@ -510,7 +512,9 @@ func One(s Shape) (graph.Value, bool) {
 
 // Fixed is a static set of nodes. Defined only for a particular QuadStore.
 type Fixed []graph.Value
-
+func (s *Fixed) Add(v ...graph.Value) {
+	*s = append(*s, v...)
+}
 func (s Fixed) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	it := qs.FixedIterator()
 	for _, v := range s {
@@ -570,6 +574,9 @@ func (s FixedTags) Optimize(qs graph.QuadStore) (Shape, bool) {
 
 // Lookup is a static set of values that must be resolved to nodes by QuadStore.
 type Lookup []quad.Value
+func (s *Lookup) Add(v ...quad.Value) {
+	*s = append(*s, v...)
+}
 
 func (s Lookup) resolve(qs graph.QuadStore) Shape {
 	// TODO: check if QS supports batch lookup
@@ -764,7 +771,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (sout Shape, opt bool) {
 		if len(s) == 1 {
 			// try to push fixed down the tree
 			switch sf := s[0].(type) {
-			case QuadsAct:
+			case QuadsAction:
 				if len(fix) == 1 {
 					// we have a single value in Fixed that is intersected with HasA tree
 					// this means we can add a new constraint: LinksTo(HasA.Dir, fixed)
