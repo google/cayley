@@ -17,8 +17,45 @@ type Shape interface {
 	// It returns a bool that indicates if shape was replaced and should always return a copy of shape in this case.
 	// In case no optimizations were made, it returns the same unmodified shape.
 	//
-	// If QuadStore is specified, it will be used to make optimizations specific for a given store.
-	Optimize(qs graph.QuadStore) (Shape, bool)
+	// If Optimizer is specified, it will be used instead of default optimizations.
+	Optimize(r Optimizer) (Shape, bool)
+}
+
+type Optimizer interface {
+	OptimizeShape(s Shape) (Shape, bool)
+}
+
+type resolveValues struct {
+	qs graph.QuadStore
+}
+
+func (r resolveValues) OptimizeShape(s Shape) (Shape, bool) {
+	if l, ok := s.(Lookup); ok {
+		return l.resolve(r.qs), true
+	}
+	return s, false
+}
+
+func Optimize(s Shape, qs graph.QuadStore) (Shape, bool) {
+	if s == nil {
+		return nil, false
+	}
+	var opt bool
+	if qs != nil {
+		// resolve all lookups earlier
+		s, opt = s.Optimize(resolveValues{qs: qs})
+	}
+	// generic optimizations
+	var opt1 bool
+	s, opt1 = s.Optimize(nil)
+	opt = opt || opt1
+	// apply quadstore-specific optimizations
+	if so, ok := qs.(Optimizer); ok && s != nil {
+		var opt2 bool
+		s, opt2 = s.Optimize(so)
+		opt = opt || opt2
+	}
+	return s, opt
 }
 
 // InternalQuad is an internal representation of quad index in QuadStore.
@@ -84,7 +121,7 @@ func BuildIterator(qs graph.QuadStore, s Shape) graph.Iterator {
 		if clog.V(2) {
 			clog.Infof("shape: %#v", s)
 		}
-		s, _ = s.Optimize(qs)
+		s, _ = Optimize(s, qs)
 		if clog.V(2) {
 			clog.Infof("optimized: %#v", s)
 		}
@@ -101,7 +138,10 @@ type Null struct{}
 func (Null) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	return iterator.NewNull()
 }
-func (Null) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Null) Optimize(r Optimizer) (Shape, bool) {
+	if r != nil {
+		return r.OptimizeShape(s)
+	}
 	return nil, true
 }
 
@@ -111,7 +151,10 @@ type AllNodes struct{}
 func (s AllNodes) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	return qs.NodesAllIterator()
 }
-func (s AllNodes) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s AllNodes) Optimize(r Optimizer) (Shape, bool) {
+	if r != nil {
+		return r.OptimizeShape(s)
+	}
 	return s, false
 }
 
@@ -133,17 +176,17 @@ func (s Except) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewNot(s.Exclude.BuildIterator(qs), all)
 }
-func (s Except) Optimize(qs graph.QuadStore) (Shape, bool) {
-	nd, opt := s.Exclude.Optimize(qs)
-	if opt {
-		s.Exclude = nd
-	}
+func (s Except) Optimize(r Optimizer) (Shape, bool) {
+	var opt bool
+	s.Exclude, opt = s.Exclude.Optimize(r)
 	if s.From != nil {
-		nd, opta := s.From.Optimize(qs)
-		if opta {
-			s.From = nd
-		}
+		var opta bool
+		s.From, opta = s.From.Optimize(r)
 		opt = opt || opta
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	if IsNull(s.Exclude) {
 		return AllNodes{}, true
@@ -174,12 +217,16 @@ func (s Filter) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return it
 }
-func (s Filter) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Filter) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.From) {
 		return nil, true
 	}
 	var opt bool
-	s.From, opt = s.From.Optimize(qs)
+	s.From, opt = s.From.Optimize(r)
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
+	}
 	if IsNull(s.From) {
 		return nil, true
 	} else if len(s.Filters) == 0 {
@@ -228,14 +275,18 @@ func (s Count) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewCount(it, qs)
 }
-func (s Count) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Count) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.Values) {
 		return Fixed{graph.PreFetched(quad.Int(0))}, true
 	}
 	var opt bool
-	s.Values, opt = s.Values.Optimize(qs)
+	s.Values, opt = s.Values.Optimize(r)
 	if IsNull(s.Values) {
 		return Fixed{graph.PreFetched(quad.Int(0))}, true
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	// TODO: ask QS to estimate size - if it exact, then we can use it
 	return s, opt
@@ -265,6 +316,7 @@ func (s QuadFilter) buildIterator(qs graph.QuadStore) graph.Iterator {
 // Quads is a selector of quads with a given set of node constraints. Empty or nil Quads is equivalent to AllQuads.
 // Equivalent to And(AllQuads,LinksTo*) iterator tree.
 type Quads []QuadFilter
+
 func (s *Quads) Intersect(q ...QuadFilter) {
 	*s = append(*s, q...)
 }
@@ -281,7 +333,7 @@ func (s Quads) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewAnd(qs, its...)
 }
-func (s Quads) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Quads) Optimize(r Optimizer) (Shape, bool) {
 	var opt bool
 	sw := 0
 	realloc := func() {
@@ -298,7 +350,7 @@ func (s Quads) Optimize(qs graph.QuadStore) (Shape, bool) {
 		if f.Values == nil {
 			return nil, true
 		}
-		v, ok := f.Values.Optimize(qs)
+		v, ok := f.Values.Optimize(r)
 		if v == nil {
 			return nil, true
 		}
@@ -312,6 +364,10 @@ func (s Quads) Optimize(qs graph.QuadStore) (Shape, bool) {
 			s[sw], s[i] = s[i], s[sw]
 			sw++
 		}
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	return s, opt
 }
@@ -332,13 +388,16 @@ func (s NodesFrom) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewHasA(qs, sub, s.Dir)
 }
-func (s NodesFrom) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s NodesFrom) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.Quads) {
 		return nil, true
 	}
-	f, opt := s.Quads.Optimize(qs)
-	if opt {
-		s.Quads = f
+	var opt bool
+	s.Quads, opt = s.Quads.Optimize(r)
+	if r != nil {
+		// ignore default optimizations
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	q, ok := s.Quads.(Quads)
 	if !ok {
@@ -370,7 +429,7 @@ func (s NodesFrom) Optimize(qs graph.QuadStore) (Shape, bool) {
 	}
 	if tags != nil {
 		// re-run optimization without fixed tags
-		ns, _ := NodesFrom{Dir: s.Dir, Quads: q}.Optimize(qs)
+		ns, _ := NodesFrom{Dir: s.Dir, Quads: q}.Optimize(r)
 		return FixedTags{On: ns, Tags: tags}, true
 	}
 	var (
@@ -408,7 +467,7 @@ func (s NodesFrom) Optimize(qs graph.QuadStore) (Shape, bool) {
 			Result: s.Dir, // this is still a HasA, remember?
 			Filter: filt,
 			Save:   save,
-		}.Optimize(qs)
+		}.Optimize(r)
 		return ns, true
 	}
 	// TODO
@@ -458,9 +517,12 @@ func (s QuadsAction) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	h := NodesFrom{Dir: s.Result, Quads: q}
 	return h.BuildIterator(qs)
 }
-func (s QuadsAction) Optimize(qs graph.QuadStore) (Shape, bool) {
-	// if quadstore has stats for quad indexes we can use them to do some optimizations
-	ind, ok := qs.(QuadIndexer)
+func (s QuadsAction) Optimize(r Optimizer) (Shape, bool) {
+	if r != nil {
+		return r.OptimizeShape(s)
+	}
+	// if optimizer has stats for quad indexes we can use them to do more
+	ind, ok := r.(QuadIndexer)
 	if !ok {
 		return s, false
 	}
@@ -512,6 +574,7 @@ func One(s Shape) (graph.Value, bool) {
 
 // Fixed is a static set of nodes. Defined only for a particular QuadStore.
 type Fixed []graph.Value
+
 func (s *Fixed) Add(v ...graph.Value) {
 	*s = append(*s, v...)
 }
@@ -525,9 +588,12 @@ func (s Fixed) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return it
 }
-func (s Fixed) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Fixed) Optimize(r Optimizer) (Shape, bool) {
 	if len(s) == 0 {
 		return nil, true
+	}
+	if r != nil {
+		return r.OptimizeShape(s)
 	}
 	return s, false
 }
@@ -551,12 +617,12 @@ func (s FixedTags) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return it
 }
-func (s FixedTags) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s FixedTags) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.On) {
 		return nil, true
 	}
 	var opt bool
-	s.On, opt = s.On.Optimize(qs)
+	s.On, opt = s.On.Optimize(r)
 	if len(s.Tags) == 0 {
 		return s.On, true
 	} else if s2, ok := s.On.(FixedTags); ok {
@@ -567,18 +633,29 @@ func (s FixedTags) Optimize(qs graph.QuadStore) (Shape, bool) {
 		for k, v := range s2.Tags {
 			tags[k] = v
 		}
-		return FixedTags{On: s2.On, Tags: tags}, true
+		s, opt = FixedTags{On: s2.On, Tags: tags}, true
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	return s, opt
 }
 
 // Lookup is a static set of values that must be resolved to nodes by QuadStore.
 type Lookup []quad.Value
+
 func (s *Lookup) Add(v ...quad.Value) {
 	*s = append(*s, v...)
 }
 
-func (s Lookup) resolve(qs graph.QuadStore) Shape {
+var _ valueResolver = graph.QuadStore(nil)
+
+type valueResolver interface {
+	ValueOf(v quad.Value) graph.Value
+}
+
+func (s Lookup) resolve(qs valueResolver) Shape {
 	// TODO: check if QS supports batch lookup
 	vals := make([]graph.Value, 0, len(s))
 	for _, v := range s {
@@ -598,11 +675,18 @@ func (s Lookup) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return f.BuildIterator(qs)
 }
-func (s Lookup) Optimize(qs graph.QuadStore) (Shape, bool) {
-	if qs == nil {
+func (s Lookup) Optimize(r Optimizer) (Shape, bool) {
+	if r == nil {
 		return s, false
 	}
-	return s.resolve(qs), true
+	ns, opt := r.OptimizeShape(s)
+	if opt {
+		return ns, true
+	}
+	if qs, ok := r.(valueResolver); ok {
+		ns, opt = s.resolve(qs), true
+	}
+	return ns, opt
 }
 
 var MaterializeThreshold = 100 // TODO: tune
@@ -620,11 +704,17 @@ func (s Materialize) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	it := s.Values.BuildIterator(qs)
 	return iterator.NewMaterializeWithSize(it, int64(s.Size))
 }
-func (s Materialize) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Materialize) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.Values) {
 		return nil, true
 	}
-	return s, false
+	var opt bool
+	s.Values, opt = s.Values.Optimize(r)
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
+	}
+	return s, opt
 }
 
 func clearFixedTags(arr []Shape) ([]Shape, map[string]graph.Value) {
@@ -662,7 +752,7 @@ func (s Intersect) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewAnd(qs, sub...)
 }
-func (s Intersect) Optimize(qs graph.QuadStore) (sout Shape, opt bool) {
+func (s Intersect) Optimize(r Optimizer) (sout Shape, opt bool) {
 	if len(s) == 0 {
 		return nil, true
 	}
@@ -680,7 +770,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (sout Shape, opt bool) {
 		if IsNull(c) {
 			return nil, true
 		}
-		v, ok := c.Optimize(qs)
+		v, ok := c.Optimize(r)
 		if !ok {
 			continue
 		}
@@ -691,8 +781,12 @@ func (s Intersect) Optimize(qs graph.QuadStore) (sout Shape, opt bool) {
 		}
 		s[i] = v
 	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
+	}
 	if arr, ft := clearFixedTags([]Shape(s)); ft != nil {
-		ns, _ := FixedTags{On: Intersect(arr), Tags: ft}.Optimize(qs)
+		ns, _ := FixedTags{On: Intersect(arr), Tags: ft}.Optimize(r)
 		return ns, true
 	}
 	var (
@@ -753,12 +847,12 @@ func (s Intersect) Optimize(qs graph.QuadStore) (sout Shape, opt bool) {
 			}
 			sv := Save{From: sout, Tags: tags}
 			var topt bool
-			sout, topt = sv.Optimize(qs)
+			sout, topt = sv.Optimize(r)
 			opt = opt || topt
 		}()
 	}
 	if quads != nil {
-		nq, qopt := quads.Optimize(qs)
+		nq, qopt := quads.Optimize(r)
 		if IsNull(nq) {
 			return nil, true
 		}
@@ -788,7 +882,7 @@ func (s Intersect) Optimize(qs graph.QuadStore) (sout Shape, opt bool) {
 					sf = sf.Clone()
 					sf.Filter[sf.Result] = fv // LinksTo(HasA.Dir, fixed)
 					sf.Size = 0               // re-calculate size
-					ns, _ := sf.Optimize(qs)
+					ns, _ := sf.Optimize(r)
 					return ns, true
 				}
 			}
@@ -830,7 +924,7 @@ func (s Union) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewOr(sub...)
 }
-func (s Union) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Union) Optimize(r Optimizer) (Shape, bool) {
 	var opt bool
 	realloc := func() {
 		if !opt {
@@ -842,7 +936,7 @@ func (s Union) Optimize(qs graph.QuadStore) (Shape, bool) {
 	// optimize subiterators
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		v, ok := c.Optimize(qs)
+		v, ok := c.Optimize(r)
 		if !ok {
 			continue
 		}
@@ -850,8 +944,12 @@ func (s Union) Optimize(qs graph.QuadStore) (Shape, bool) {
 		opt = true
 		s[i] = v
 	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
+	}
 	if arr, ft := clearFixedTags([]Shape(s)); ft != nil {
-		ns, _ := FixedTags{On: Union(arr), Tags: ft}.Optimize(qs)
+		ns, _ := FixedTags{On: Union(arr), Tags: ft}.Optimize(r)
 		return ns, true
 	}
 	// second pass - remove Null
@@ -892,16 +990,18 @@ func (s Page) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return it
 }
-func (s Page) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Page) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.From) {
 		return nil, true
 	}
-	f, opt := s.From.Optimize(qs)
-	if opt {
-		s.From = f
-	}
+	var opt bool
+	s.From, opt = s.From.Optimize(r)
 	if s.Skip <= 0 && s.Limit <= 0 {
 		return s.From, true
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	// TODO: check size
 	return s, false
@@ -919,14 +1019,18 @@ func (s Unique) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	it := s.From.BuildIterator(qs)
 	return iterator.NewUnique(it)
 }
-func (s Unique) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Unique) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.From) {
 		return nil, true
 	}
-	f, opt := s.From.Optimize(qs)
-	s.From = f
+	var opt bool
+	s.From, opt = s.From.Optimize(r)
 	if IsNull(s.From) {
 		return nil, true
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	return s, opt
 }
@@ -948,16 +1052,18 @@ func (s Save) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return it
 }
-func (s Save) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Save) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.From) {
 		return nil, true
 	}
-	f, opt := s.From.Optimize(qs)
-	if opt {
-		s.From = f
-	}
+	var opt bool
+	s.From, opt = s.From.Optimize(r)
 	if len(s.Tags) == 0 {
 		return s.From, true
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	return s, opt
 }
@@ -974,14 +1080,18 @@ func (s Optional) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	}
 	return iterator.NewOptional(s.From.BuildIterator(qs))
 }
-func (s Optional) Optimize(qs graph.QuadStore) (Shape, bool) {
+func (s Optional) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.From) {
 		return nil, true
 	}
-	f, opt := s.From.Optimize(qs)
-	s.From = f
+	var opt bool
+	s.From, opt = s.From.Optimize(r)
 	if IsNull(s.From) {
 		return nil, true
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
 	}
 	return s, opt
 }

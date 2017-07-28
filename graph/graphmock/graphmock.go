@@ -21,53 +21,6 @@ type StringNode string
 
 func (s StringNode) Key() interface{} { return s }
 
-var _ graph.QuadStore = Lookup(nil)
-
-type Lookup map[quad.Value]graph.Value
-
-func (Lookup) ApplyDeltas(_ []graph.Delta, _ graph.IgnoreOpts) error {
-	panic("not implemented")
-}
-func (Lookup) Quad(_ graph.Value) quad.Quad {
-	panic("not implemented")
-}
-func (Lookup) QuadIterator(_ quad.Direction, _ graph.Value) graph.Iterator {
-	panic("not implemented")
-}
-func (Lookup) NodesAllIterator() graph.Iterator {
-	panic("not implemented")
-}
-func (Lookup) QuadsAllIterator() graph.Iterator {
-	panic("not implemented")
-}
-func (qs Lookup) ValueOf(v quad.Value) graph.Value {
-	return qs[v]
-}
-func (Lookup) NameOf(_ graph.Value) quad.Value {
-	panic("not implemented")
-}
-func (Lookup) Size() int64 {
-	panic("not implemented")
-}
-func (Lookup) Horizon() graph.PrimaryKey {
-	panic("not implemented")
-}
-func (Lookup) FixedIterator() graph.FixedIterator {
-	panic("not implemented")
-}
-func (Lookup) OptimizeIterator(_ graph.Iterator) (graph.Iterator, bool) {
-	panic("not implemented")
-}
-func (Lookup) Close() error {
-	panic("not implemented")
-}
-func (Lookup) QuadDirection(_ graph.Value, _ quad.Direction) graph.Value {
-	panic("not implemented")
-}
-func (Lookup) Type() string {
-	panic("not implemented")
-}
-
 // Oldstore is a mocked version of the QuadStore interface, for use in tests.
 type Oldstore struct {
 	Parse bool

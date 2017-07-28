@@ -33,11 +33,62 @@ func intVal(v int) graph.Value {
 	return graphmock.IntVal(v)
 }
 
+var _ Optimizer = ValLookup(nil)
+var _ graph.QuadStore = ValLookup(nil)
+
+type ValLookup map[quad.Value]graph.Value
+
+func (qs ValLookup) OptimizeShape(s Shape) (Shape, bool) {
+	return s, false // emulate dumb quad store
+}
+func (qs ValLookup) ValueOf(v quad.Value) graph.Value {
+	return qs[v]
+}
+func (ValLookup) ApplyDeltas(_ []graph.Delta, _ graph.IgnoreOpts) error {
+	panic("not implemented")
+}
+func (ValLookup) Quad(_ graph.Value) quad.Quad {
+	panic("not implemented")
+}
+func (ValLookup) QuadIterator(_ quad.Direction, _ graph.Value) graph.Iterator {
+	panic("not implemented")
+}
+func (ValLookup) NodesAllIterator() graph.Iterator {
+	panic("not implemented")
+}
+func (ValLookup) QuadsAllIterator() graph.Iterator {
+	panic("not implemented")
+}
+func (ValLookup) NameOf(_ graph.Value) quad.Value {
+	panic("not implemented")
+}
+func (ValLookup) Size() int64 {
+	panic("not implemented")
+}
+func (ValLookup) Horizon() graph.PrimaryKey {
+	panic("not implemented")
+}
+func (ValLookup) FixedIterator() graph.FixedIterator {
+	panic("not implemented")
+}
+func (ValLookup) OptimizeIterator(_ graph.Iterator) (graph.Iterator, bool) {
+	panic("not implemented")
+}
+func (ValLookup) Close() error {
+	panic("not implemented")
+}
+func (ValLookup) QuadDirection(_ graph.Value, _ quad.Direction) graph.Value {
+	panic("not implemented")
+}
+func (ValLookup) Type() string {
+	panic("not implemented")
+}
+
 var optimizeCases = []struct {
 	from   Shape
 	expect Shape
 	opt    bool
-	qs     graphmock.Lookup
+	qs     ValLookup
 }{
 	{
 		from:   AllNodes{},
@@ -58,7 +109,7 @@ var optimizeCases = []struct {
 			{Dir: quad.Subject, Values: Fixed{intVal(1)}},
 			{Dir: quad.Object, Values: Fixed{intVal(2)}},
 		},
-		qs: graphmock.Lookup{
+		qs: ValLookup{
 			quad.IRI("bob"):   intVal(1),
 			quad.IRI("alice"): intVal(2),
 		},
@@ -78,7 +129,7 @@ var optimizeCases = []struct {
 			QuadsAction{Result: quad.Subject},
 			Unique{QuadsAction{Result: quad.Object}},
 		},
-		qs: graphmock.Lookup{
+		qs: ValLookup{
 			quad.IRI("alice"): intVal(1),
 		},
 	},
@@ -174,7 +225,7 @@ var optimizeCases = []struct {
 func TestOptimize(t *testing.T) {
 	for _, c := range optimizeCases {
 		qs := c.qs
-		got, opt := c.from.Optimize(qs)
+		got, opt := Optimize(c.from, qs)
 		assert.Equal(t, c.expect, got)
 		assert.Equal(t, c.opt, opt)
 	}
