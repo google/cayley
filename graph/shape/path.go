@@ -1,13 +1,13 @@
 package shape
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/quad"
-	"golang.org/x/net/context"
 )
 
 func StartNodes(nodes ...graph.Value) Path {
@@ -240,6 +240,20 @@ func Predicates(from Shape, in bool) Shape {
 func (p Path) Predicates(in bool) Path {
 	p.root = Predicates(p.root, in)
 	return p
+}
+
+func Labels(from Shape) Shape {
+	return Unique{NodesFrom{
+		Quads: Union{
+			Quads{
+				{Dir: quad.Subject, Values: from},
+			},
+			Quads{
+				{Dir: quad.Object, Values: from},
+			},
+		},
+		Dir: quad.Label,
+	}}
 }
 
 func (p Path) Intersect(shape ...Shape) Path {

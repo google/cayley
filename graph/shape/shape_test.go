@@ -164,7 +164,7 @@ var optimizeCases = []struct {
 			}}},
 		}},
 		opt:    true,
-		expect: nil,
+		expect: Null{},
 	},
 	{ // remove "all nodes" in intersect, merge Fixed and order them first
 		from: Intersect{

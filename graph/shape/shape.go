@@ -45,15 +45,24 @@ func Optimize(s Shape, qs graph.QuadStore) (Shape, bool) {
 		// resolve all lookups earlier
 		s, opt = s.Optimize(resolveValues{qs: qs})
 	}
+	if s == nil {
+		return Null{}, true
+	}
 	// generic optimizations
 	var opt1 bool
 	s, opt1 = s.Optimize(nil)
+	if s == nil {
+		return Null{}, true
+	}
 	opt = opt || opt1
 	// apply quadstore-specific optimizations
 	if so, ok := qs.(Optimizer); ok && s != nil {
 		var opt2 bool
 		s, opt2 = s.Optimize(so)
 		opt = opt || opt2
+	}
+	if s == nil {
+		return Null{}, true
 	}
 	return s, opt
 }

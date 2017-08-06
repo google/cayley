@@ -65,7 +65,7 @@ func regexMorphism(pattern *regexp.Regexp, refs bool) morphism {
 		Name:     "regex",
 		Reversal: func(ctx *pathContext) (morphism, *pathContext) { return regexMorphism(pattern, refs), ctx },
 		Apply: func(in shape.Shape, ctx *pathContext) (shape.Shape, *pathContext) {
-			return shape.Filter{From:in,
+			return shape.Filter{From: in,
 				Filters: []shape.ValueFilter{
 					shape.Regexp{Re: pattern, Refs: refs},
 				},
@@ -214,21 +214,15 @@ func labelContextMorphism(tags []string, via ...interface{}) morphism {
 // labelsMorphism iterates to the uniqified set of labels from
 // the given set of nodes in the path.
 func labelsMorphism() morphism {
-	m := morphism{
+	return morphism{
 		Name: "labels",
 		Reversal: func(ctx *pathContext) (morphism, *pathContext) {
 			panic("not implemented")
 		},
-		Apply: func(qs graph.QuadStore, in graph.Iterator, ctx *pathContext) (graph.Iterator, *pathContext) {
-			inLinks := iterator.NewLinksTo(qs, in, quad.Object)
-			outLinks := iterator.NewLinksTo(qs, in.Clone(), quad.Subject)
-			both := iterator.NewOr(inLinks, outLinks)
-			hasa := iterator.NewHasA(qs, both, quad.Label)
-			return iterator.NewUnique(hasa), ctx
+		Apply: func(in shape.Shape, ctx *pathContext) (shape.Shape, *pathContext) {
+			return shape.Labels(in), ctx
 		},
 	}
-
-	return m
 }
 
 // predicatesMorphism iterates to the uniqified set of predicates from
@@ -256,7 +250,7 @@ type iteratorShape struct {
 func (s iteratorShape) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	return s.it.Clone()
 }
-func (s iteratorShape) Optimize(qs graph.QuadStore) (shape.Shape, bool) {
+func (s iteratorShape) Optimize(r shape.Optimizer) (shape.Shape, bool) {
 	return s, false
 }
 
@@ -308,7 +302,7 @@ type iteratorBuilder func(qs graph.QuadStore) graph.Iterator
 func (s iteratorBuilder) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	return s(qs)
 }
-func (s iteratorBuilder) Optimize(qs graph.QuadStore) (shape.Shape, bool) {
+func (s iteratorBuilder) Optimize(r shape.Optimizer) (shape.Shape, bool) {
 	return s, false
 }
 
