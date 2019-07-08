@@ -26,10 +26,11 @@ type Order struct {
 	index int
 	runstats graph.IteratorStats
 	err      error
-	ordered   values
+	ordered   *values
 }
 
-func getOrderedValues(qs graph.QuadStore, subIt graph.Iterator) values {
+func getOrderedValues(it *Order) *values {
+	var qs, subIt = it.qs, it.subIt
 	var results = make([]result, 0)
 	var vals = values{results, qs}
 	var ctx = context.TODO()
@@ -45,7 +46,7 @@ func getOrderedValues(qs graph.QuadStore, subIt graph.Iterator) values {
 
 	subIt.Reset()
 
-	return vals
+	return &vals
 }
 
 func NewOrder(qs graph.QuadStore, subIt graph.Iterator) *Order {
@@ -53,7 +54,7 @@ func NewOrder(qs graph.QuadStore, subIt graph.Iterator) *Order {
 		qs: 	 qs,
 		uid:     NextUID(),
 		subIt: 	 subIt,
-		ordered: getOrderedValues(qs, subIt),
+		ordered: nil,
 	}
 }
 
@@ -69,6 +70,9 @@ func (it *Order) Reset() {
 }
 
 func (it *Order) TagResults(dst map[string]graph.Value) {
+	if it.index >= len(it.ordered.results) {
+		return
+	}
 	for tag, value := range it.ordered.results[it.index].tags {
 		dst[tag] = value
 	}
@@ -77,16 +81,19 @@ func (it *Order) TagResults(dst map[string]graph.Value) {
 // SubIterators returns a slice of the sub iterators. The first iterator is the
 // primary iterator, for which the complement is generated.
 func (it *Order) SubIterators() []graph.Iterator {
-	return []graph.Iterator{it.subIt}
+	return nil
 }
 
 // Next advances the subiterator, continuing until it returns a value which it
 // has not previously seen.
 func (it *Order) Next(ctx context.Context) bool {
 	it.runstats.Next += 1
-	if it.index < len(it.ordered.results) - 1 {
-		it.index += 1
+	if it.ordered == nil {
+		it.ordered = getOrderedValues(it)
+	}
+	if it.index < len(it.ordered.results) {
 		it.result = it.ordered.results[it.index].id
+		it.index += 1
 		return true
 	}
 	return false
