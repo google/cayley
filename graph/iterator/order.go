@@ -9,12 +9,12 @@ import (
 var _ graph.Iterator = &Order{}
 
 type values struct {
-	results []graph.Value
+	results []result
 	qs graph.QuadStore
 }
 
 func (a values) Len() int           { return len(a.results) }
-func (a values) Less(i, j int) bool { return a.qs.NameOf(a.results[i]).String() < a.qs.NameOf(a.results[j]).String() }
+func (a values) Less(i, j int) bool { return a.qs.NameOf(a.results[i].id).String() < a.qs.NameOf(a.results[j].id).String() }
 func (a values) Swap(i, j int)      { a.results[i], a.results[j] = a.results[j], a.results[i] }
 
 // Order iterator removes duplicate values from it's subiterator.
@@ -23,19 +23,22 @@ type Order struct {
 	qs		 graph.QuadStore
 	subIt    graph.Iterator
 	result   graph.Value
-	resultIndex int
+	index int
 	runstats graph.IteratorStats
 	err      error
 	ordered   values
 }
 
 func getOrderedValues(qs graph.QuadStore, subIt graph.Iterator) values {
-	var results = make([]graph.Value, 0)
+	var results = make([]result, 0)
 	var vals = values{results, qs}
 	var ctx = context.TODO()
 	
 	for subIt.Next(ctx) {
-		vals.results = append(vals.results, subIt.Result())
+		var id = subIt.Result()
+		var tags = make(map[string]graph.Value)
+		subIt.TagResults(tags)
+		vals.results = append(vals.results, result{id, tags})
 	}
 
 	sort.Sort(vals)
@@ -61,13 +64,13 @@ func (it *Order) UID() uint64 {
 // Reset resets the internal iterators and the iterator itself.
 func (it *Order) Reset() {
 	it.result = nil
-	it.resultIndex = 0
+	it.index = 0
 	it.subIt.Reset()
 }
 
 func (it *Order) TagResults(dst map[string]graph.Value) {
-	if it.subIt != nil {
-		it.subIt.TagResults(dst)
+	for tag, value := range it.ordered.results[it.index].tags {
+		dst[tag] = value
 	}
 }
 
@@ -81,9 +84,9 @@ func (it *Order) SubIterators() []graph.Iterator {
 // has not previously seen.
 func (it *Order) Next(ctx context.Context) bool {
 	it.runstats.Next += 1
-	if it.resultIndex < len(it.ordered.results) - 1 {
-		it.resultIndex += 1
-		it.result = it.ordered.results[it.resultIndex]
+	if it.index < len(it.ordered.results) - 1 {
+		it.index += 1
+		it.result = it.ordered.results[it.index].id
 		return true
 	}
 	return false
