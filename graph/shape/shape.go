@@ -1423,3 +1423,30 @@ func FilterQuads(subject, predicate, object, label []quad.Value) Shape {
 	}
 	return q
 }
+
+type Order struct {
+	From Shape
+}
+
+func (s Order) BuildIterator(qs graph.QuadStore) graph.Iterator {
+	if IsNull(s.From) {
+		return iterator.NewNull()
+	}
+	it := s.From.BuildIterator(qs)
+	return iterator.NewOrder(qs, it)
+}
+func (s Order) Optimize(r Optimizer) (Shape, bool) {
+	if IsNull(s.From) {
+		return nil, true
+	}
+	var opt bool
+	s.From, opt = s.From.Optimize(r)
+	if IsNull(s.From) {
+		return nil, true
+	}
+	if r != nil {
+		ns, nopt := r.OptimizeShape(s)
+		return ns, opt || nopt
+	}
+	return s, opt
+}

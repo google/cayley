@@ -220,7 +220,7 @@ func (it *QuadIterator) String() string {
 	return fmt.Sprintf("KVQuads(%v)", it.ind)
 }
 
-func (it *QuadIterator) Sorted() bool { return true }
+func (it *QuadIterator) Ordered() bool { return true }
 
 func (it *QuadIterator) Optimize() (graph.Iterator, bool) {
 	return it, false

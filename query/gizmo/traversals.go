@@ -679,3 +679,8 @@ func (p *pathObject) Skip(offset int) *pathObject {
 	np := p.clonePath().Skip(int64(offset))
 	return p.new(np)
 }
+
+func (p *pathObject) Order() *pathObject {
+	np := p.clonePath().Order()
+	return p.new(np)
+}

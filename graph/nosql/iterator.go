@@ -198,7 +198,7 @@ func (it *Iterator) Size() (int64, bool) {
 	return it.size, true
 }
 
-func (it *Iterator) Sorted() bool                     { return true }
+func (it *Iterator) Ordered() bool                     { return true }
 func (it *Iterator) Optimize() (graph.Iterator, bool) { return it, false }
 
 func (it *Iterator) String() string {
