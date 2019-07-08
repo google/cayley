@@ -124,8 +124,6 @@ func (it *Order) Optimize() (graph.Iterator, bool) {
 	return it, false
 }
 
-const OrdernessFactor = 2
-
 func (it *Order) Stats() graph.IteratorStats {
 	subStats := it.subIt.Stats()
 	return graph.IteratorStats{
