@@ -4,16 +4,18 @@ import (
 	"context"
 	"sort"
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad"
 )
 
 var _ graph.Iterator = &Order{}
 
-type values []quad.Value
+type values struct {
+	results []graph.Value
+	qs graph.QuadStore
+}
 
-func (a values) Len() int           { return len(a) }
-func (a values) Less(i, j int) bool { return a[i].String() < a[j].String() }
-func (a values) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a values) Len() int           { return len(a.results) }
+func (a values) Less(i, j int) bool { return a.qs.NameOf(a.results[i]).String() < a.qs.NameOf(a.results[j]).String() }
+func (a values) Swap(i, j int)      { a.results[i], a.results[j] = a.results[j], a.results[i] }
 
 // Order iterator removes duplicate values from it's subiterator.
 type Order struct {
@@ -28,13 +30,12 @@ type Order struct {
 }
 
 func getOrderedValues(qs graph.QuadStore, subIt graph.Iterator) values {
-	var vals = make(values, 0)
+	var results = make([]graph.Value, 0)
+	var vals = values{results, qs}
 	var ctx = context.TODO()
 	
 	for subIt.Next(ctx) {
-		var result = subIt.Result()
-		var value = qs.NameOf(result)
-		vals = append(vals, value)
+		vals.results = append(vals.results, subIt.Result())
 	}
 
 	sort.Sort(vals)
@@ -80,9 +81,9 @@ func (it *Order) SubIterators() []graph.Iterator {
 // has not previously seen.
 func (it *Order) Next(ctx context.Context) bool {
 	it.runstats.Next += 1
-	if it.resultIndex < len(it.ordered) - 1 {
+	if it.resultIndex < len(it.ordered.results) - 1 {
 		it.resultIndex += 1
-		it.result = it.qs.ValueOf(it.ordered[it.resultIndex])
+		it.result = it.ordered.results[it.resultIndex]
 		return true
 	}
 	return false
@@ -112,7 +113,7 @@ func (it *Order) NextPath(ctx context.Context) bool {
 
 // Close closes the primary iterators.
 func (it *Order) Close() error {
-	it.ordered = nil
+	it.ordered.results = nil
 	return it.subIt.Close()
 }
 
@@ -129,7 +130,7 @@ func (it *Order) Stats() graph.IteratorStats {
 	return graph.IteratorStats{
 		NextCost:     1,
 		ContainsCost: subStats.ContainsCost,
-		Size:         int64(len(it.ordered)),
+		Size:         int64(len(it.ordered.results)),
 		ExactSize:    true,
 		Next:         it.runstats.Next,
 		Contains:     it.runstats.Contains,
