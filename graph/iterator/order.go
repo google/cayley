@@ -60,6 +60,7 @@ func (it *Order) UID() uint64 {
 // Reset resets the internal iterators and the iterator itself.
 func (it *Order) Reset() {
 	it.result = nil
+	it.resultIndex = 0
 	it.subIt.Reset()
 }
 
