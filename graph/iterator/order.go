@@ -70,10 +70,8 @@ func (it *Order) Reset() {
 }
 
 func (it *Order) TagResults(dst map[string]graph.Value) {
-	if it.index >= len(it.ordered.results) {
-		return
-	}
-	for tag, value := range it.ordered.results[it.index].tags {
+	var prevIndex = it.index - 1
+	for tag, value := range it.ordered.results[prevIndex].tags {
 		dst[tag] = value
 	}
 }
