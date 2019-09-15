@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
@@ -555,7 +556,7 @@ func checkQueries(t *testing.T, qs graph.QuadStore, timeout time.Duration) {
 				t.Errorf("Unexpected number of results, got:%d expect:%d on %s.", len(got), len(test.expect), test.message)
 				return
 			}
-			if unsortedEqual(got, test.expect) {
+			if assert.ElementsMatch(t, got, test.expect) {
 				return
 			}
 			t.Errorf("Unexpected results for %s:\n", test.message)
@@ -564,12 +565,6 @@ func checkQueries(t *testing.T, qs graph.QuadStore, timeout time.Duration) {
 			}
 		})
 	}
-}
-
-func unsortedEqual(got, expect []interface{}) bool {
-	gotList := convertToStringList(got)
-	expectList := convertToStringList(expect)
-	return reflect.DeepEqual(gotList, expectList)
 }
 
 func convertToStringList(in []interface{}) []string {
