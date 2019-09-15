@@ -188,7 +188,7 @@ func ToJSON(v quad.Value) interface{} {
 	case quad.IRI:
 		return map[string]string { "@id": string(v) }
 	case quad.BNode:
-		return map[string]string { "@id": string(v) }
+		return map[string]string { "@id": v.String() }
 	case quad.String:
 		return string(v)
 	case quad.TypedString:
