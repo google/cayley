@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
@@ -63,6 +64,13 @@ func intVal(v int) string {
 
 const multiGraphTestFile = "../../data/testdata_multigraph.nq"
 
+
+type IDDocument = map[string]string;
+
+func newIDDocument(id string) IDDocument {
+	return map[string]string{ "@id": id }
+}
+
 var testQueries = []struct {
 	message string
 	data    []quad.Quad
@@ -70,7 +78,7 @@ var testQueries = []struct {
 	limit   int
 	tag     string
 	file 	string
-	expect  []string
+	expect  []interface{}
 	err     bool // TODO(dennwc): define error types for Gizmo and handle them
 }{
 	// Simple query tests.
@@ -79,63 +87,63 @@ var testQueries = []struct {
 		query: `
 			g.V("<alice>").All()
 		`,
-		expect: []string{"<alice>"},
+		expect: []interface{}{newIDDocument("alice")},
 	},
 	{
 		message: "use .GetLimit",
 		query: `
 			g.V().GetLimit(5)
 		`,
-		expect: []string{"<alice>", "<bob>", "<follows>", "<fred>", "<status>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("bob"), newIDDocument("follows"), newIDDocument("fred"), newIDDocument("status")},
 	},
 	{
 		message: "get a single vertex (IRI)",
 		query: `
 			g.V(iri("alice")).All()
 		`,
-		expect: []string{"<alice>"},
+		expect: []interface{}{newIDDocument("alice")},
 	},
 	{
 		message: "use .Out()",
 		query: `
 			g.V("<alice>").Out("<follows>").All()
 		`,
-		expect: []string{"<bob>"},
+		expect: []interface{}{newIDDocument("bob")},
 	},
 	{
 		message: "use .Out() (IRI)",
 		query: `
 			g.V(iri("alice")).Out(iri("follows")).All()
 		`,
-		expect: []string{"<bob>"},
+		expect: []interface{}{newIDDocument("bob")},
 	},
 	{
 		message: "use .Out() (any)",
 		query: `
 			g.V("<bob>").Out().All()
 		`,
-		expect: []string{"<fred>", "cool_person"},
+		expect: []interface{}{newIDDocument("fred"), "cool_person"},
 	},
 	{
 		message: "use .In()",
 		query: `
 			g.V("<bob>").In("<follows>").All()
 		`,
-		expect: []string{"<alice>", "<charlie>", "<dani>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
 	},
 	{
 		message: "use .In() (any)",
 		query: `
 			g.V("<bob>").In().All()
 		`,
-		expect: []string{"<alice>", "<charlie>", "<dani>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
 	},
 	{
 		message: "use .In() with .Filter()",
 		query: `
 			g.V("<bob>").In("<follows>").Filter(gt(iri("c")),lt(iri("d"))).All()
 		`,
-		expect: []string{"<charlie>"},
+		expect: []interface{}{newIDDocument("charlie")},
 	},
 	{
 		message: "use .In() with .Filter(regex)",
@@ -149,21 +157,21 @@ var testQueries = []struct {
 		query: `
 			g.V("<bob>").In("<follows>").Filter(like("al%")).All()
 		`,
-		expect: []string{"<alice>"},
+		expect: []interface{}{newIDDocument("alice")},
 	},
 	{
 		message: "use .In() with .Filter(wildcard)",
 		query: `
 			g.V("<bob>").In("<follows>").Filter(like("a?i%e")).All()
 		`,
-		expect: []string{"<alice>"},
+		expect: []interface{}{newIDDocument("alice")},
 	},
 	{
 		message: "use .In() with .Filter(regex with IRIs)",
 		query: `
 			g.V("<bob>").In("<follows>").Filter(regex("ar?li.*e", true)).All()
 		`,
-		expect: []string{"<alice>", "<charlie>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie")},
 	},
 	{
 		message: "use .In() with .Filter(regex with IRIs)",
@@ -177,14 +185,14 @@ var testQueries = []struct {
 		query: `
 			g.V("<bob>").In("<follows>").Filter(regex("ar?li.*e", true),gt(iri("c"))).All()
 		`,
-		expect: []string{"<charlie>"},
+		expect: []interface{}{newIDDocument("charlie")},
 	},
 	{
 		message: "use .Both()",
 		query: `
 			g.V("<fred>").Both("<follows>").All()
 		`,
-		expect: []string{"<bob>", "<greg>", "<emily>"},
+		expect: []interface{}{newIDDocument("bob"), newIDDocument("greg"), newIDDocument("emily")},
 	},
 	{
 		message: "use .Both() with tag",
@@ -192,14 +200,14 @@ var testQueries = []struct {
 			g.V("<fred>").Both(null, "pred").All()
 		`,
 		tag:    "pred",
-		expect: []string{"<follows>", "<follows>", "<follows>"},
+		expect: []interface{}{newIDDocument("follows"), newIDDocument("follows"), newIDDocument("follows")},
 	},
 	{
 		message: "use .Tag()-.Is()-.Back()",
 		query: `
 			g.V("<bob>").In("<follows>").Tag("foo").Out("<status>").Is("cool_person").Back("foo").All()
 		`,
-		expect: []string{"<dani>"},
+		expect: []interface{}{newIDDocument("dani")},
 	},
 	{
 		message: "separate .Tag()-.Is()-.Back()",
@@ -207,7 +215,7 @@ var testQueries = []struct {
 			x = g.V("<charlie>").Out("<follows>").Tag("foo").Out("<status>").Is("cool_person").Back("foo")
 			x.In("<follows>").Is("<dani>").Back("foo").All()
 		`,
-		expect: []string{"<bob>"},
+		expect: []interface{}{newIDDocument("bob")},
 	},
 	{
 		message: "do multiple .Back()s",
@@ -215,21 +223,21 @@ var testQueries = []struct {
 			g.V("<emily>").Out("<follows>").As("f").Out("<follows>").Out("<status>").Is("cool_person").Back("f").In("<follows>").In("<follows>").As("acd").Out("<status>").Is("cool_person").Back("f").All()
 		`,
 		tag:    "acd",
-		expect: []string{"<dani>"},
+		expect: []interface{}{newIDDocument("dani")},
 	},
 	{
 		message: "use Except to filter out a single vertex",
 		query: `
 			g.V("<alice>", "<bob>").Except(g.V("<alice>")).All()
 		`,
-		expect: []string{"<bob>"},
+		expect: []interface{}{newIDDocument("bob")},
 	},
 	{
 		message: "use chained Except",
 		query: `
 			g.V("<alice>", "<bob>", "<charlie>").Except(g.V("<bob>")).Except(g.V("<charlie>")).All()
 		`,
-		expect: []string{"<alice>"},
+		expect: []interface{}{newIDDocument("alice")},
 	},
 
 	{
@@ -237,7 +245,7 @@ var testQueries = []struct {
 		query: `
 			g.V("<alice>", "<bob>", "<charlie>").Out("<follows>").Unique().All()
 		`,
-		expect: []string{"<bob>", "<dani>", "<fred>"},
+		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani"), newIDDocument("fred")},
 	},
 
 	// Morphism tests.
@@ -247,7 +255,7 @@ var testQueries = []struct {
 			grandfollows = g.M().Out("<follows>").Out("<follows>")
 			g.V("<charlie>").Follow(grandfollows).All()
 		`,
-		expect: []string{"<greg>", "<fred>", "<bob>"},
+		expect: []interface{}{newIDDocument("greg"), newIDDocument("fred"), newIDDocument("bob")},
 	},
 	{
 		message: "show reverse morphism",
@@ -255,7 +263,7 @@ var testQueries = []struct {
 			grandfollows = g.M().Out("<follows>").Out("<follows>")
 			g.V("<fred>").FollowR(grandfollows).All()
 		`,
-		expect: []string{"<alice>", "<charlie>", "<dani>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
 	},
 
 	// Intersection tests.
@@ -265,7 +273,7 @@ var testQueries = []struct {
 			function follows(x) { return g.V(x).Out("<follows>") }
 			follows("<dani>").And(follows("<charlie>")).All()
 		`,
-		expect: []string{"<bob>"},
+		expect: []interface{}{newIDDocument("bob")},
 	},
 	{
 		message: "show simple morphism intersection",
@@ -274,7 +282,7 @@ var testQueries = []struct {
 			function gfollows(x) { return g.V(x).Follow(grandfollows) }
 			gfollows("<alice>").And(gfollows("<charlie>")).All()
 		`,
-		expect: []string{"<fred>"},
+		expect: []interface{}{newIDDocument("fred")},
 	},
 	{
 		message: "show double morphism intersection",
@@ -283,7 +291,7 @@ var testQueries = []struct {
 			function gfollows(x) { return g.V(x).Follow(grandfollows) }
 			gfollows("<emily>").And(gfollows("<charlie>")).And(gfollows("<bob>")).All()
 		`,
-		expect: []string{"<greg>"},
+		expect: []interface{}{newIDDocument("greg")},
 	},
 	{
 		message: "show reverse intersection",
@@ -291,7 +299,7 @@ var testQueries = []struct {
 			grandfollows = g.M().Out("<follows>").Out("<follows>")
 			g.V("<greg>").FollowR(grandfollows).Intersect(g.V("<fred>").FollowR(grandfollows)).All()
 		`,
-		expect: []string{"<charlie>"},
+		expect: []interface{}{newIDDocument("charlie")},
 	},
 	{
 		message: "show standard sort of morphism intersection, continue follow",
@@ -299,14 +307,14 @@ var testQueries = []struct {
 			function cool(x) { return g.V(x).As("a").Out("<status>").Is("cool_person").Back("a") }
 			cool("<greg>").Follow(gfollowers).Intersect(cool("<bob>").Follow(gfollowers)).All()
 		`,
-		expect: []string{"<charlie>"},
+		expect: []interface{}{newIDDocument("charlie")},
 	},
 	{
 		message: "test Or()",
 		query: `
 			g.V("<bob>").Out("<follows>").Or(g.V().Has("<status>", "cool_person")).All()
 		`,
-		expect: []string{"<fred>", "<bob>", "<greg>", "<dani>"},
+		expect: []interface{}{newIDDocument("fred"), newIDDocument("bob"), newIDDocument("greg"), newIDDocument("dani")},
 	},
 
 	// Has tests.
@@ -315,28 +323,28 @@ var testQueries = []struct {
 		query: `
 				g.V().Has("<status>", "cool_person").All()
 		`,
-		expect: []string{"<greg>", "<dani>", "<bob>"},
+		expect: []interface{}{newIDDocument("greg"), newIDDocument("dani"), newIDDocument("bob")},
 	},
 	{
 		message: "show a simple HasR",
 		query: `
 				g.V().HasR("<status>", "<bob>").All()
 		`,
-		expect: []string{"cool_person"},
+		expect: []interface{}{"cool_person"},
 	},
 	{
 		message: "show a double Has",
 		query: `
 				g.V().Has("<status>", "cool_person").Has("<follows>", "<fred>").All()
 		`,
-		expect: []string{"<bob>"},
+		expect: []interface{}{newIDDocument("bob")},
 	},
 	{
 		message: "show a Has with filter",
 		query: `
 				g.V().Has("<follows>", gt("<f>")).All()
 		`,
-		expect: []string{"<bob>", "<dani>", "<emily>", "<fred>"},
+		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani"), newIDDocument("emily"), newIDDocument("fred")},
 	},
 
 	// Skip/Limit tests.
@@ -345,21 +353,21 @@ var testQueries = []struct {
 		query: `
 				g.V().Has("<status>", "cool_person").Limit(2).All()
 		`,
-		expect: []string{"<bob>", "<dani>"},
+		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani")},
 	},
 	{
 		message: "use Skip",
 		query: `
 				g.V().Has("<status>", "cool_person").Skip(2).All()
 		`,
-		expect: []string{"<greg>"},
+		expect: []interface{}{newIDDocument("greg")},
 	},
 	{
 		message: "use Skip and Limit",
 		query: `
 				g.V().Has("<status>", "cool_person").Skip(1).Limit(1).All()
 		`,
-		expect: []string{"<dani>"},
+		expect: []interface{}{newIDDocument("dani")},
 	},
 
 	{
@@ -367,14 +375,14 @@ var testQueries = []struct {
 		query: `
 				g.V().Has("<status>").Count()
 		`,
-		expect: []string{"5"},
+		expect: []interface{}{"5"},
 	},
 	{
 		message: "use Count value",
 		query: `
 				g.Emit(g.V().Has("<status>").Count()+1)
 		`,
-		expect: []string{"6"},
+		expect: []interface{}{"6"},
 	},
 
 	// Tag tests.
@@ -384,7 +392,7 @@ var testQueries = []struct {
 			g.V().Save("<status>", "somecool").All()
 		`,
 		tag:    "somecool",
-		expect: []string{"cool_person", "cool_person", "cool_person", "smart_person", "smart_person"},
+		expect: []interface{}{"cool_person", "cool_person", "cool_person", "smart_person", "smart_person"},
 	},
 	{
 		message: "show a simple save optional",
@@ -392,7 +400,7 @@ var testQueries = []struct {
 			g.V("<bob>","<charlie>").Out("<follows>").SaveOpt("<status>", "somecool").All()
 		`,
 		tag:    "somecool",
-		expect: []string{"cool_person", "cool_person"},
+		expect: []interface{}{"cool_person", "cool_person"},
 	},
 	{
 		message: "show a simple saveR",
@@ -400,7 +408,7 @@ var testQueries = []struct {
 			g.V("cool_person").SaveR("<status>", "who").All()
 		`,
 		tag:    "who",
-		expect: []string{"<greg>", "<dani>", "<bob>"},
+		expect: []interface{}{newIDDocument("greg"), newIDDocument("dani"), newIDDocument("bob")},
 	},
 	{
 		message: "show an out save",
@@ -408,7 +416,7 @@ var testQueries = []struct {
 			g.V("<dani>").Out(null, "pred").All()
 		`,
 		tag:    "pred",
-		expect: []string{"<follows>", "<follows>", "<status>"},
+		expect: []interface{}{newIDDocument("follows"), newIDDocument("follows"), newIDDocument("status")},
 	},
 	{
 		message: "show a tag list",
@@ -416,35 +424,35 @@ var testQueries = []struct {
 			g.V("<dani>").Out(null, ["pred", "foo", "bar"]).All()
 		`,
 		tag:    "foo",
-		expect: []string{"<follows>", "<follows>", "<status>"},
+		expect: []interface{}{newIDDocument("follows"), newIDDocument("follows"), newIDDocument("status")},
 	},
 	{
 		message: "show a pred list",
 		query: `
 			g.V("<dani>").Out(["<follows>", "<status>"]).All()
 		`,
-		expect: []string{"<bob>", "<greg>", "cool_person"},
+		expect: []interface{}{newIDDocument("bob"), "<greg>", "cool_person"},
 	},
 	{
 		message: "show a predicate path",
 		query: `
 			g.V("<dani>").Out(g.V("<follows>"), "pred").All()
 		`,
-		expect: []string{"<bob>", "<greg>"},
+		expect: []interface{}{newIDDocument("bob"), newIDDocument("greg")},
 	},
 	{
 		message: "list all bob's incoming predicates",
 		query: `
 		  g.V("<bob>").InPredicates().All()
 		`,
-		expect: []string{"<follows>"},
+		expect: []interface{}{newIDDocument("follows")},
 	},
 	{
 		message: "save all bob's incoming predicates",
 		query: `
 		  g.V("<bob>").SaveInPredicates("pred").All()
 		`,
-		expect: []string{"<follows>", "<follows>", "<follows>"},
+		expect: []interface{}{newIDDocument("follows"), newIDDocument("follows"), newIDDocument("follows")},
 		tag:    "pred",
 	},
 	{
@@ -452,35 +460,35 @@ var testQueries = []struct {
 		query: `
 		  g.V().Labels().All()
 		`,
-		expect: []string{"<smart_graph>"},
+		expect: []interface{}{newIDDocument("smart_graph")},
 	},
 	{
 		message: "list all in predicates",
 		query: `
 		  g.V().InPredicates().All()
 		`,
-		expect: []string{"<are>", "<follows>", "<status>"},
+		expect: []interface{}{newIDDocument("are"), newIDDocument("follows"), newIDDocument("status")},
 	},
 	{
 		message: "list all out predicates",
 		query: `
 		  g.V().OutPredicates().All()
 		`,
-		expect: []string{"<are>", "<follows>", "<status>"},
+		expect: []interface{}{newIDDocument("are"), newIDDocument("follows"), newIDDocument("status")},
 	},
 	{
 		message: "traverse using LabelContext",
 		query: `
 			g.V("<greg>").LabelContext("<smart_graph>").Out("<status>").All()
 		`,
-		expect: []string{"smart_person"},
+		expect: []interface{}{"smart_person"},
 	},
 	{
 		message: "open and close a LabelContext",
 		query: `
 			g.V().LabelContext("<smart_graph>").In("<status>").LabelContext(null).In("<follows>").All()
 		`,
-		expect: []string{"<dani>", "<fred>"},
+		expect: []interface{}{newIDDocument("dani"), newIDDocument("fred")},
 	},
 	{
 		message: "issue #254",
@@ -494,7 +502,7 @@ var testQueries = []struct {
 		s = g.V(v).Out("<status>").ToValue()
 		g.V(s).All()
 		`,
-		expect: []string{"cool_person"},
+		expect: []interface{}{"cool_person"},
 	},
 	{
 		message: "roundtrip values (tag map)",
@@ -503,7 +511,7 @@ var testQueries = []struct {
 		s = g.V(v.id).Out("<status>").TagValue()
 		g.V(s.id).All()
 		`,
-		expect: []string{"cool_person"},
+		expect: []interface{}{"cool_person"},
 	},
 	{
 		message: "show ToArray",
@@ -511,7 +519,7 @@ var testQueries = []struct {
 			arr = g.V("<bob>").In("<follows>").ToArray()
 			for (i in arr) g.Emit(arr[i]);
 		`,
-		expect: []string{"<alice>", "<charlie>", "<dani>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
 	},
 	{
 		message: "show ToArray with limit",
@@ -519,21 +527,21 @@ var testQueries = []struct {
 			arr = g.V("<bob>").In("<follows>").ToArray(2)
 			for (i in arr) g.Emit(arr[i]);
 		`,
-		expect: []string{"<alice>", "<charlie>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie")},
 	},
 	{
 		message: "show ForEach",
 		query: `
 			g.V("<bob>").In("<follows>").ForEach(function(o){g.Emit(o.id)});
 		`,
-		expect: []string{"<alice>", "<charlie>", "<dani>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
 	},
 	{
 		message: "show ForEach with limit",
 		query: `
 			g.V("<bob>").In("<follows>").ForEach(2, function(o){g.Emit(o.id)});
 		`,
-		expect: []string{"<alice>", "<charlie>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie")},
 	},
 	{
 		message: "clone paths",
@@ -544,7 +552,7 @@ var testQueries = []struct {
 			g.Emit(out.ToValue())
 			g.Emit(alice.ToValue())
 		`,
-		expect: []string{"<alice>", "<bob>", "<alice>"},
+		expect: []interface{}{newIDDocument("alice"), newIDDocument("bob"), newIDDocument("alice")},
 	},
 	{
 		message: "default namespaces",
@@ -552,7 +560,7 @@ var testQueries = []struct {
 			g.AddDefaultNamespaces()
 			g.Emit(g.Uri('rdf:type'))
 		`,
-		expect: []string{"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"},
+		expect: []interface{}{newIDDocument("http/)/www.w3.org/1999/02/22-rdf-syntaxnewIDDocument(-nstype")},
 	},
 	{
 		message: "add namespace",
@@ -560,14 +568,14 @@ var testQueries = []struct {
 			g.AddNamespace('ex','http://example.net/')
 			g.Emit(g.Uri('ex:alice'))
 		`,
-		expect: []string{"<http://example.net/alice>"},
+		expect: []interface{}{newIDDocument("http/)/examplenewIDDocument(.netalice")},
 	},
 	{
 		message: "recursive follow",
 		query: `
 			g.V("<charlie>").FollowRecursive("<follows>").All();
 		`,
-		expect: []string{"<bob>", "<dani>", "<fred>", "<greg>"},
+		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani"), newIDDocument("fred"), newIDDocument("greg")},
 	},
 	{
 		message: "recursive follow tag",
@@ -575,14 +583,14 @@ var testQueries = []struct {
 			g.V("<charlie>").FollowRecursive("<follows>", "depth").All();
 		`,
 		tag:    "depth",
-		expect: []string{intVal(1), intVal(1), intVal(2), intVal(2)},
+		expect: []interface{}{intVal(1), intVal(1), intVal(2), intVal(2)},
 	},
 	{
 		message: "recursive follow path",
 		query: `
 			g.V("<charlie>").FollowRecursive(g.V().Out("<follows>")).All();
 		`,
-		expect: []string{"<bob>", "<dani>", "<fred>", "<greg>"},
+		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani"), newIDDocument("fred"), newIDDocument("greg")},
 	},
 	{
 		message: "find non-existent",
@@ -607,7 +615,7 @@ var testQueries = []struct {
 		`,
 		tag:    "statusTag",
 		file: multiGraphTestFile,
-		expect: []string{"smart_person"},
+		expect: []interface{}{"smart_person"},
 	},
 	{
 		message: "issue #758. Verify saveR respects label context.",
@@ -616,11 +624,11 @@ var testQueries = []struct {
 		`,
 		tag:    "who",
 		file: multiGraphTestFile,
-		expect: []string{"<fred>"},
+		expect: []interface{}{newIDDocument("fred")},
 	},
 }
 
-func runQueryGetTag(rec func(), g []quad.Quad, qu string, tag string, limit int) ([]string, error) {
+func runQueryGetTag(rec func(), g []quad.Quad, qu string, tag string, limit int) ([]interface{}, error) {
 	js := makeTestSession(g)
 	c := make(chan query.Result, 1)
 	go func() {
@@ -628,7 +636,7 @@ func runQueryGetTag(rec func(), g []quad.Quad, qu string, tag string, limit int)
 		js.Execute(context.TODO(), qu, c, limit)
 	}()
 
-	var results []string
+	var results []interface{}
 	for res := range c {
 		if err := res.Err(); err != nil {
 			return results, err
@@ -686,8 +694,7 @@ func TestGizmo(t *testing.T) {
 				}
 				t.Error(err)
 			}
-			sort.Strings(got)
-			sort.Strings(test.expect)
+			assert.ElementsMatch(t, got, test.expect)
 			if !reflect.DeepEqual(got, test.expect) {
 				t.Errorf("got: %v expected: %v", got, test.expect)
 			}
@@ -709,7 +716,7 @@ var issue160TestGraph = []quad.Quad{
 
 func TestIssue160(t *testing.T) {
 	qu := `g.V().Tag('query').Out(raw('follows')).Out(raw('follows')).ForEach(function (item) { if (item.id !== item.query) g.Emit({ id: item.id }); })`
-	expect := []string{
+	expect := []interface{}{
 		"****\nid : alice\n",
 		"****\nid : bob\n",
 		"****\nid : bob\n",
@@ -755,9 +762,9 @@ func issue718Graph() []quad.Quad {
 	return quads
 }
 
-func issue718Nodes() []string {
-	var nodes []string
-	nodes = append(nodes, "<a>", "<b>")
+func issue718Nodes() []interface{} {
+	var nodes []interface{}
+	nodes = append(nodes, newIDDocument("a"), newIDDocument("b"))
 	for i := 0; i < issue718Limit-2; i++ {
 		n := fmt.Sprintf("<n%d>", i+1)
 		nodes = append(nodes, n)
