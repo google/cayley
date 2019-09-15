@@ -25,6 +25,7 @@ import (
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/cayley/quad/jsonld"
 	"github.com/cayleygraph/cayley/query"
 	"github.com/cayleygraph/cayley/schema"
 	"github.com/cayleygraph/cayley/voc"
@@ -102,7 +103,7 @@ func (s *Session) buildEnv() error {
 func (s *Session) tagsToValueMap(m map[string]graph.Ref) map[string]interface{} {
 	outputMap := make(map[string]interface{})
 	for k, v := range m {
-		if o := quadValueToNative(s.qs.NameOf(v)); o != nil {
+		if o := jsonld.ToJSON(s.qs.NameOf(v)); o != nil {
 			outputMap[k] = o
 		}
 	}
@@ -133,7 +134,7 @@ func (s *Session) runIteratorToArrayNoTags(it graph.Iterator, limit int) ([]inte
 
 	output := make([]interface{}, 0)
 	err := graph.Iterate(ctx, it).Paths(false).Limit(limit).EachValue(s.qs, func(v quad.Value) {
-		if o := quadValueToNative(v); o != nil {
+		if o := jsonld.ToJSON(v); o != nil {
 			output = append(output, o)
 		}
 	})
@@ -364,7 +365,8 @@ func (s *Session) Collate(result query.Result) {
 	sort.Strings(tagKeys)
 	for _, k := range tagKeys {
 		if name := s.qs.NameOf(tags[k]); name != nil {
-			obj[k] = quadValueToNative(name)
+			o := jsonld.ToJSON(name)
+			obj[k] = o
 		} else {
 			delete(obj, k)
 		}

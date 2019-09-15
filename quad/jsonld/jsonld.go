@@ -179,6 +179,29 @@ func toTerm(v quad.Value) gojsonld.Term {
 	}
 }
 
+func typedStringToJSON(v quad.TypedString) map[string]string {
+	return map[string]string { "@value": string(v.Value), "@type": string(v.Type) }
+}
+
+func ToJSON(v quad.Value) interface{} {
+	switch v := v.(type) {
+	case quad.IRI:
+		return map[string]string { "@id": string(v) }
+	case quad.BNode:
+		return map[string]string { "@id": string(v) }
+	case quad.String:
+		return string(v)
+	case quad.TypedString:
+		return typedStringToJSON(v)
+	case quad.LangString:
+		return map[string]string { "@value": string(v.Value), "@language": string(v.Lang) }
+	case quad.TypedStringer:
+		return typedStringToJSON(v.TypedString())
+	default:
+		return v.String()
+	}
+}
+
 func toValue(t gojsonld.Term) quad.Value {
 	switch t := t.(type) {
 	case *gojsonld.Resource:
