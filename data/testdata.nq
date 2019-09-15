@@ -13,4 +13,3 @@
 <predicates> <are> <status> .
 <emily> <status> "smart_person" <smart_graph> .
 <greg> <status> "smart_person" <smart_graph> .
-<alice> <name> "Alice"@en .
