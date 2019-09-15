@@ -433,11 +433,36 @@ var queries = []struct {
 		g.V("_:9037", "_:49278", "_:44112", "_:44709", "_:43382").save("</film/performance/character>", "char").save("</film/performance/actor>", "act").saveR("</film/film/starring>", "film").all()
 		`,
 		expect: []interface{}{
-			map[string]string{"act": "</en/humphrey_bogart>", "char": "Rick Blaine", "film": "</en/casablanca_1942>", "id": "_:9037"},
-			map[string]string{"act": "</en/humphrey_bogart>", "char": "Sam Spade", "film": "</en/the_maltese_falcon_1941>", "id": "_:49278"},
-			map[string]string{"act": "</en/humphrey_bogart>", "char": "Philip Marlowe", "film": "</en/the_big_sleep_1946>", "id": "_:44112"},
-			map[string]string{"act": "</en/humphrey_bogart>", "char": "Captain Queeg", "film": "</en/the_caine_mutiny_1954>", "id": "_:44709"},
-			map[string]string{"act": "</en/humphrey_bogart>", "char": "Charlie Allnut", "film": "</en/the_african_queen>", "id": "_:43382"},
+			map[string]interface{}{
+				"act": map[string]string{ "@id": "/en/humphrey_bogart" },
+				"char": "Rick Blaine",
+				"film": map[string]string{ "@id": "/en/casablanca_1942" },
+				"id": map[string]string{ "@id": "_:9037" },
+			},
+			map[string]interface{}{
+				"act": map[string]string{ "@id": "/en/humphrey_bogart" },
+				"char": "Sam Spade",
+				"film": map[string]string{ "@id": "/en/the_maltese_falcon_1941" },
+				"id": map[string]string{ "@id": "_:49278" },
+			},
+			map[string]interface{}{
+				"act": map[string]string{ "@id": "/en/humphrey_bogart" },
+				"char": "Philip Marlowe",
+				"film": map[string]string{ "@id": "/en/the_big_sleep_1946" },
+				"id": map[string]string{ "@id": "_:44112" },
+			},
+			map[string]interface{}{
+				"act": map[string]string{ "@id": "/en/humphrey_bogart" },
+				"char": "Captain Queeg",
+				"film": map[string]string{ "@id": "/en/the_caine_mutiny_1954" },
+				"id": map[string]string{ "@id": "_:44709" },
+			},
+			map[string]interface{}{
+				"act": map[string]string{ "@id": "/en/humphrey_bogart" },
+				"char": "Charlie Allnut",
+				"film": map[string]string{ "@id": "/en/the_african_queen>" },
+				"id": map[string]string{ "@id": "_:43382" },
+			},
 		},
 	},
 }
