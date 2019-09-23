@@ -21,8 +21,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
@@ -64,11 +64,10 @@ func intVal(v int) string {
 
 const multiGraphTestFile = "../../data/testdata_multigraph.nq"
 
-
-type IDDocument = map[string]string;
+type IDDocument = map[string]string
 
 func newIDDocument(id string) IDDocument {
-	return map[string]string{ "@id": id }
+	return map[string]string{"@id": id}
 }
 
 var testQueries = []struct {
