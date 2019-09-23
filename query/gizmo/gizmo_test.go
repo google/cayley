@@ -21,7 +21,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/cayleygraph/cayley/graph"
@@ -64,12 +63,6 @@ func intVal(v int) string {
 
 const multiGraphTestFile = "../../data/testdata_multigraph.nq"
 
-type IDDocument = map[string]string
-
-func newIDDocument(id string) IDDocument {
-	return map[string]string{"@id": id}
-}
-
 var testQueries = []struct {
 	message string
 	data    []quad.Quad
@@ -77,7 +70,7 @@ var testQueries = []struct {
 	limit   int
 	tag     string
 	file    string
-	expect  []interface{}
+	expect  []string
 	err     bool // TODO(dennwc): define error types for Gizmo and handle them
 }{
 	// Simple query tests.
@@ -86,63 +79,70 @@ var testQueries = []struct {
 		query: `
 			g.V("<alice>").all()
 		`,
-		expect: []interface{}{newIDDocument("alice")},
+		expect: []string{"<alice>"},
+	},
+	{
+		message: "get a single vertex (legacy)",
+		query: `
+			g.V("<alice>").All()
+		`,
+		expect: []string{"<alice>"},
 	},
 	{
 		message: "use .getLimit",
 		query: `
 			g.V().getLimit(5)
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("bob"), newIDDocument("follows"), newIDDocument("fred"), newIDDocument("status")},
+		expect: []string{"<alice>", "<bob>", "<follows>", "<fred>", "<status>"},
 	},
 	{
 		message: "get a single vertex (IRI)",
 		query: `
 			g.V(iri("alice")).all()
 		`,
-		expect: []interface{}{newIDDocument("alice")},
+		expect: []string{"<alice>"},
 	},
 	{
 		message: "use .out()",
 		query: `
 			g.V("<alice>").out("<follows>").all()
 		`,
-		expect: []interface{}{newIDDocument("bob")},
+		expect: []string{"<bob>"},
 	},
 	{
 		message: "use .out() (IRI)",
 		query: `
 			g.V(iri("alice")).out(iri("follows")).all()
 		`,
-		expect: []interface{}{newIDDocument("bob")},
+		expect: []string{"<bob>"},
 	},
 	{
 		message: "use .out() (any)",
 		query: `
 			g.V("<bob>").out().all()
 		`,
-		expect: []interface{}{newIDDocument("fred"), "cool_person"},
+		expect: []string{"<fred>", "cool_person"},
 	},
 	{
 		message: "use .in()",
 		query: `
 			g.V("<bob>").in("<follows>").all()
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
+		expect: []string{"<alice>", "<charlie>", "<dani>"},
 	},
 	{
 		message: "use .in() (any)",
 		query: `
 			g.V("<bob>").in().all()
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
+		expect: []string{"<alice>", "<charlie>", "<dani>"},
 	},
 	{
 		message: "use .in() with .filter()",
 		query: `
 			g.V("<bob>").in("<follows>").filter(gt(iri("c")),lt(iri("d"))).all()
 		`,
-		expect: []interface{}{newIDDocument("charlie")},
+		expect: []string{"<charlie>"},
 	},
 	{
 		message: "use .in() with .filter(regex)",
@@ -156,21 +156,21 @@ var testQueries = []struct {
 		query: `
 			g.V("<bob>").in("<follows>").filter(like("al%")).all()
 		`,
-		expect: []interface{}{newIDDocument("alice")},
+		expect: []string{"<alice>"},
 	},
 	{
 		message: "use .in() with .filter(wildcard)",
 		query: `
 			g.V("<bob>").in("<follows>").filter(like("a?i%e")).all()
 		`,
-		expect: []interface{}{newIDDocument("alice")},
+		expect: []string{"<alice>"},
 	},
 	{
 		message: "use .in() with .filter(regex with IRIs)",
 		query: `
 			g.V("<bob>").in("<follows>").filter(regex("ar?li.*e", true)).all()
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie")},
+		expect: []string{"<alice>", "<charlie>"},
 	},
 	{
 		message: "use .in() with .filter(regex with IRIs)",
@@ -184,14 +184,14 @@ var testQueries = []struct {
 		query: `
 			g.V("<bob>").in("<follows>").filter(regex("ar?li.*e", true),gt(iri("c"))).all()
 		`,
-		expect: []interface{}{newIDDocument("charlie")},
+		expect: []string{"<charlie>"},
 	},
 	{
 		message: "use .both()",
 		query: `
 			g.V("<fred>").both("<follows>").all()
 		`,
-		expect: []interface{}{newIDDocument("bob"), newIDDocument("greg"), newIDDocument("emily")},
+		expect: []string{"<bob>", "<greg>", "<emily>"},
 	},
 	{
 		message: "use .both() with tag",
@@ -199,14 +199,14 @@ var testQueries = []struct {
 			g.V("<fred>").both(null, "pred").all()
 		`,
 		tag:    "pred",
-		expect: []interface{}{newIDDocument("follows"), newIDDocument("follows"), newIDDocument("follows")},
+		expect: []string{"<follows>", "<follows>", "<follows>"},
 	},
 	{
 		message: "use .tag()-.is()-.back()",
 		query: `
 			g.V("<bob>").in("<follows>").tag("foo").out("<status>").is("cool_person").back("foo").all()
 		`,
-		expect: []interface{}{newIDDocument("dani")},
+		expect: []string{"<dani>"},
 	},
 	{
 		message: "separate .tag()-.is()-.back()",
@@ -214,7 +214,7 @@ var testQueries = []struct {
 			x = g.V("<charlie>").out("<follows>").tag("foo").out("<status>").is("cool_person").back("foo")
 			x.in("<follows>").is("<dani>").back("foo").all()
 		`,
-		expect: []interface{}{newIDDocument("bob")},
+		expect: []string{"<bob>"},
 	},
 	{
 		message: "do multiple .back()",
@@ -222,21 +222,21 @@ var testQueries = []struct {
 			g.V("<emily>").out("<follows>").as("f").out("<follows>").out("<status>").is("cool_person").back("f").in("<follows>").in("<follows>").as("acd").out("<status>").is("cool_person").back("f").all()
 		`,
 		tag:    "acd",
-		expect: []interface{}{newIDDocument("dani")},
+		expect: []string{"<dani>"},
 	},
 	{
 		message: "use Except to filter out a single vertex",
 		query: `
 			g.V("<alice>", "<bob>").except(g.V("<alice>")).all()
 		`,
-		expect: []interface{}{newIDDocument("bob")},
+		expect: []string{"<bob>"},
 	},
 	{
 		message: "use chained Except",
 		query: `
 			g.V("<alice>", "<bob>", "<charlie>").except(g.V("<bob>")).except(g.V("<charlie>")).all()
 		`,
-		expect: []interface{}{newIDDocument("alice")},
+		expect: []string{"<alice>"},
 	},
 
 	{
@@ -244,7 +244,7 @@ var testQueries = []struct {
 		query: `
 			g.V("<alice>", "<bob>", "<charlie>").out("<follows>").unique().all()
 		`,
-		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani"), newIDDocument("fred")},
+		expect: []string{"<bob>", "<dani>", "<fred>"},
 	},
 
 	// Morphism tests.
@@ -254,7 +254,7 @@ var testQueries = []struct {
 			grandfollows = g.M().out("<follows>").out("<follows>")
 			g.V("<charlie>").follow(grandfollows).all()
 		`,
-		expect: []interface{}{newIDDocument("greg"), newIDDocument("fred"), newIDDocument("bob")},
+		expect: []string{"<greg>", "<fred>", "<bob>"},
 	},
 	{
 		message: "show reverse morphism",
@@ -262,7 +262,7 @@ var testQueries = []struct {
 			grandfollows = g.M().out("<follows>").out("<follows>")
 			g.V("<fred>").followR(grandfollows).all()
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
+		expect: []string{"<alice>", "<charlie>", "<dani>"},
 	},
 
 	// Intersection tests.
@@ -272,7 +272,7 @@ var testQueries = []struct {
 			function follows(x) { return g.V(x).out("<follows>") }
 			follows("<dani>").and(follows("<charlie>")).all()
 		`,
-		expect: []interface{}{newIDDocument("bob")},
+		expect: []string{"<bob>"},
 	},
 	{
 		message: "show simple morphism intersection",
@@ -281,7 +281,7 @@ var testQueries = []struct {
 			function gfollows(x) { return g.V(x).follow(grandfollows) }
 			gfollows("<alice>").and(gfollows("<charlie>")).all()
 		`,
-		expect: []interface{}{newIDDocument("fred")},
+		expect: []string{"<fred>"},
 	},
 	{
 		message: "show double morphism intersection",
@@ -290,7 +290,7 @@ var testQueries = []struct {
 			function gfollows(x) { return g.V(x).follow(grandfollows) }
 			gfollows("<emily>").and(gfollows("<charlie>")).and(gfollows("<bob>")).all()
 		`,
-		expect: []interface{}{newIDDocument("greg")},
+		expect: []string{"<greg>"},
 	},
 	{
 		message: "show reverse intersection",
@@ -298,7 +298,7 @@ var testQueries = []struct {
 			grandfollows = g.M().out("<follows>").out("<follows>")
 			g.V("<greg>").followR(grandfollows).intersect(g.V("<fred>").followR(grandfollows)).all()
 		`,
-		expect: []interface{}{newIDDocument("charlie")},
+		expect: []string{"<charlie>"},
 	},
 	{
 		message: "show standard sort of morphism intersection, continue follow",
@@ -306,14 +306,14 @@ var testQueries = []struct {
 			function cool(x) { return g.V(x).as("a").out("<status>").is("cool_person").back("a") }
 			cool("<greg>").follow(gfollowers).intersect(cool("<bob>").follow(gfollowers)).all()
 		`,
-		expect: []interface{}{newIDDocument("charlie")},
+		expect: []string{"<charlie>"},
 	},
 	{
 		message: "test Or()",
 		query: `
 			g.V("<bob>").out("<follows>").or(g.V().has("<status>", "cool_person")).all()
 		`,
-		expect: []interface{}{newIDDocument("fred"), newIDDocument("bob"), newIDDocument("greg"), newIDDocument("dani")},
+		expect: []string{"<fred>", "<bob>", "<greg>", "<dani>"},
 	},
 
 	// Has tests.
@@ -322,28 +322,28 @@ var testQueries = []struct {
 		query: `
 				g.V().has("<status>", "cool_person").all()
 		`,
-		expect: []interface{}{newIDDocument("greg"), newIDDocument("dani"), newIDDocument("bob")},
+		expect: []string{"<greg>", "<dani>", "<bob>"},
 	},
 	{
 		message: "show a simple HasR",
 		query: `
 				g.V().hasR("<status>", "<bob>").all()
 		`,
-		expect: []interface{}{"cool_person"},
+		expect: []string{"cool_person"},
 	},
 	{
 		message: "show a double Has",
 		query: `
 				g.V().has("<status>", "cool_person").has("<follows>", "<fred>").all()
 		`,
-		expect: []interface{}{newIDDocument("bob")},
+		expect: []string{"<bob>"},
 	},
 	{
 		message: "show a Has with filter",
 		query: `
 				g.V().has("<follows>", gt("<f>")).all()
 		`,
-		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani"), newIDDocument("emily"), newIDDocument("fred")},
+		expect: []string{"<bob>", "<dani>", "<emily>", "<fred>"},
 	},
 
 	// Skip/Limit tests.
@@ -352,21 +352,21 @@ var testQueries = []struct {
 		query: `
 				g.V().has("<status>", "cool_person").limit(2).all()
 		`,
-		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani")},
+		expect: []string{"<bob>", "<dani>"},
 	},
 	{
 		message: "use Skip",
 		query: `
 				g.V().has("<status>", "cool_person").skip(2).all()
 		`,
-		expect: []interface{}{newIDDocument("greg")},
+		expect: []string{"<greg>"},
 	},
 	{
 		message: "use Skip and Limit",
 		query: `
 				g.V().has("<status>", "cool_person").skip(1).limit(1).all()
 		`,
-		expect: []interface{}{newIDDocument("dani")},
+		expect: []string{"<dani>"},
 	},
 
 	{
@@ -374,14 +374,14 @@ var testQueries = []struct {
 		query: `
 				g.V().has("<status>").count()
 		`,
-		expect: []interface{}{"5"},
+		expect: []string{"5"},
 	},
 	{
 		message: "use Count value",
 		query: `
 				g.emit(g.V().has("<status>").count()+1)
 		`,
-		expect: []interface{}{"6"},
+		expect: []string{"6"},
 	},
 
 	// Tag tests.
@@ -391,7 +391,7 @@ var testQueries = []struct {
 			g.V().save("<status>", "somecool").all()
 		`,
 		tag:    "somecool",
-		expect: []interface{}{"cool_person", "cool_person", "cool_person", "smart_person", "smart_person"},
+		expect: []string{"cool_person", "cool_person", "cool_person", "smart_person", "smart_person"},
 	},
 	{
 		message: "show a simple save optional",
@@ -399,7 +399,7 @@ var testQueries = []struct {
 			g.V("<bob>","<charlie>").out("<follows>").saveOpt("<status>", "somecool").all()
 		`,
 		tag:    "somecool",
-		expect: []interface{}{"cool_person", "cool_person"},
+		expect: []string{"cool_person", "cool_person"},
 	},
 	{
 		message: "show a simple saveR",
@@ -407,7 +407,7 @@ var testQueries = []struct {
 			g.V("cool_person").saveR("<status>", "who").all()
 		`,
 		tag:    "who",
-		expect: []interface{}{newIDDocument("greg"), newIDDocument("dani"), newIDDocument("bob")},
+		expect: []string{"<greg>", "<dani>", "<bob>"},
 	},
 	{
 		message: "show an out save",
@@ -415,7 +415,7 @@ var testQueries = []struct {
 			g.V("<dani>").out(null, "pred").all()
 		`,
 		tag:    "pred",
-		expect: []interface{}{newIDDocument("follows"), newIDDocument("follows"), newIDDocument("status")},
+		expect: []string{"<follows>", "<follows>", "<status>"},
 	},
 	{
 		message: "show a tag list",
@@ -423,35 +423,35 @@ var testQueries = []struct {
 			g.V("<dani>").out(null, ["pred", "foo", "bar"]).all()
 		`,
 		tag:    "foo",
-		expect: []interface{}{newIDDocument("follows"), newIDDocument("follows"), newIDDocument("status")},
+		expect: []string{"<follows>", "<follows>", "<status>"},
 	},
 	{
 		message: "show a pred list",
 		query: `
 			g.V("<dani>").out(["<follows>", "<status>"]).all()
 		`,
-		expect: []interface{}{newIDDocument("bob"), "<greg>", "cool_person"},
+		expect: []string{"<bob>", "<greg>", "cool_person"},
 	},
 	{
 		message: "show a predicate path",
 		query: `
 			g.V("<dani>").out(g.V("<follows>"), "pred").all()
 		`,
-		expect: []interface{}{newIDDocument("bob"), newIDDocument("greg")},
+		expect: []string{"<bob>", "<greg>"},
 	},
 	{
 		message: "list all bob's incoming predicates",
 		query: `
 		  g.V("<bob>").inPredicates().all()
 		`,
-		expect: []interface{}{newIDDocument("follows")},
+		expect: []string{"<follows>"},
 	},
 	{
 		message: "save all bob's incoming predicates",
 		query: `
 		  g.V("<bob>").saveInPredicates("pred").all()
 		`,
-		expect: []interface{}{newIDDocument("follows"), newIDDocument("follows"), newIDDocument("follows")},
+		expect: []string{"<follows>", "<follows>", "<follows>"},
 		tag:    "pred",
 	},
 	{
@@ -459,35 +459,35 @@ var testQueries = []struct {
 		query: `
 		  g.V().labels().all()
 		`,
-		expect: []interface{}{newIDDocument("smart_graph")},
+		expect: []string{"<smart_graph>"},
 	},
 	{
 		message: "list all in predicates",
 		query: `
 		  g.V().inPredicates().all()
 		`,
-		expect: []interface{}{newIDDocument("are"), newIDDocument("follows"), newIDDocument("status")},
+		expect: []string{"<are>", "<follows>", "<status>"},
 	},
 	{
 		message: "list all out predicates",
 		query: `
 		  g.V().outPredicates().all()
 		`,
-		expect: []interface{}{newIDDocument("are"), newIDDocument("follows"), newIDDocument("status")},
+		expect: []string{"<are>", "<follows>", "<status>"},
 	},
 	{
 		message: "traverse using LabelContext",
 		query: `
 			g.V("<greg>").labelContext("<smart_graph>").out("<status>").all()
 		`,
-		expect: []interface{}{"smart_person"},
+		expect: []string{"smart_person"},
 	},
 	{
 		message: "open and close a LabelContext",
 		query: `
 			g.V().labelContext("<smart_graph>").in("<status>").labelContext(null).in("<follows>").all()
 		`,
-		expect: []interface{}{newIDDocument("dani"), newIDDocument("fred")},
+		expect: []string{"<dani>", "<fred>"},
 	},
 	{
 		message: "issue #254",
@@ -501,7 +501,7 @@ var testQueries = []struct {
 		s = g.V(v).out("<status>").toValue()
 		g.V(s).all()
 		`,
-		expect: []interface{}{"cool_person"},
+		expect: []string{"cool_person"},
 	},
 	{
 		message: "roundtrip values (tag map)",
@@ -510,7 +510,7 @@ var testQueries = []struct {
 		s = g.V(v.id).out("<status>").tagValue()
 		g.V(s.id).all()
 		`,
-		expect: []interface{}{"cool_person"},
+		expect: []string{"cool_person"},
 	},
 	{
 		message: "show ToArray",
@@ -518,7 +518,7 @@ var testQueries = []struct {
 			arr = g.V("<bob>").in("<follows>").toArray()
 			for (i in arr) g.emit(arr[i]);
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
+		expect: []string{"<alice>", "<charlie>", "<dani>"},
 	},
 	{
 		message: "show ToArray with limit",
@@ -526,21 +526,21 @@ var testQueries = []struct {
 			arr = g.V("<bob>").in("<follows>").toArray(2)
 			for (i in arr) g.emit(arr[i]);
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie")},
+		expect: []string{"<alice>", "<charlie>"},
 	},
 	{
 		message: "show ForEach",
 		query: `
 			g.V("<bob>").in("<follows>").forEach(function(o){g.emit(o.id)});
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie"), newIDDocument("dani")},
+		expect: []string{"<alice>", "<charlie>", "<dani>"},
 	},
 	{
 		message: "show ForEach with limit",
 		query: `
 			g.V("<bob>").in("<follows>").forEach(2, function(o){g.emit(o.id)});
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("charlie")},
+		expect: []string{"<alice>", "<charlie>"},
 	},
 	{
 		message: "clone paths",
@@ -551,7 +551,7 @@ var testQueries = []struct {
 			g.emit(out.toValue())
 			g.emit(alice.toValue())
 		`,
-		expect: []interface{}{newIDDocument("alice"), newIDDocument("bob"), newIDDocument("alice")},
+		expect: []string{"<alice>", "<bob>", "<alice>"},
 	},
 	{
 		message: "default namespaces",
@@ -559,7 +559,7 @@ var testQueries = []struct {
 			g.addDefaultNamespaces()
 			g.emit(g.IRI('rdf:type'))
 		`,
-		expect: []interface{}{newIDDocument("http/)/www.w3.org/1999/02/22-rdf-syntaxnewIDDocument(-nstype")},
+		expect: []string{"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"},
 	},
 	{
 		message: "add namespace",
@@ -567,14 +567,14 @@ var testQueries = []struct {
 			g.addNamespace('ex','http://example.net/')
 			g.emit(g.IRI('ex:alice'))
 		`,
-		expect: []interface{}{newIDDocument("http/)/examplenewIDDocument(.netalice")},
+		expect: []string{"<http://example.net/alice>"},
 	},
 	{
 		message: "recursive follow",
 		query: `
 			g.V("<charlie>").followRecursive("<follows>").all();
 		`,
-		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani"), newIDDocument("fred"), newIDDocument("greg")},
+		expect: []string{"<bob>", "<dani>", "<fred>", "<greg>"},
 	},
 	{
 		message: "recursive follow tag",
@@ -582,14 +582,14 @@ var testQueries = []struct {
 			g.V("<charlie>").followRecursive("<follows>", "depth").all();
 		`,
 		tag:    "depth",
-		expect: []interface{}{intVal(1), intVal(1), intVal(2), intVal(2)},
+		expect: []string{intVal(1), intVal(1), intVal(2), intVal(2)},
 	},
 	{
 		message: "recursive follow path",
 		query: `
 			g.V("<charlie>").followRecursive(g.V().out("<follows>")).all();
 		`,
-		expect: []interface{}{newIDDocument("bob"), newIDDocument("dani"), newIDDocument("fred"), newIDDocument("greg")},
+		expect: []string{"<bob>", "<dani>", "<fred>", "<greg>"},
 	},
 	{
 		message: "find non-existent",
@@ -614,7 +614,7 @@ var testQueries = []struct {
 		`,
 		tag:    "statusTag",
 		file:   multiGraphTestFile,
-		expect: []interface{}{"smart_person"},
+		expect: []string{"smart_person"},
 	},
 	{
 		message: "issue #758. Verify saveR respects label context.",
@@ -623,11 +623,11 @@ var testQueries = []struct {
 		`,
 		tag:    "who",
 		file:   multiGraphTestFile,
-		expect: []interface{}{newIDDocument("fred")},
+		expect: []string{"<fred>"},
 	},
 }
 
-func runQueryGetTag(rec func(), g []quad.Quad, qu string, tag string, limit int) ([]interface{}, error) {
+func runQueryGetTag(rec func(), g []quad.Quad, qu string, tag string, limit int) ([]string, error) {
 	js := makeTestSession(g)
 	ctx := context.TODO()
 	it, err := js.Execute(ctx, qu, query.Options{
@@ -640,7 +640,7 @@ func runQueryGetTag(rec func(), g []quad.Quad, qu string, tag string, limit int)
 	defer it.Close()
 	defer rec()
 
-	var results []interface{}
+	var results []string
 	for it.Next(ctx) {
 		data := it.Result().(*Result)
 		if data.Val == nil {
@@ -698,7 +698,8 @@ func TestGizmo(t *testing.T) {
 				}
 				t.Error(err)
 			}
-			assert.ElementsMatch(t, got, test.expect)
+			sort.Strings(got)
+			sort.Strings(test.expect)
 			if !reflect.DeepEqual(got, test.expect) {
 				t.Errorf("got: %v expected: %v", got, test.expect)
 			}
@@ -722,7 +723,7 @@ func TestIssue160(t *testing.T) {
 	qu := `g.V().tag('query').out(raw('follows')).out(raw('follows')).forEach(function (item) {
 		if (item.id !== item.query) g.emit({ id: item.id });
 	})`
-	expect := []interface{}{
+	expect := []string{
 		"****\nid : alice\n",
 		"****\nid : bob\n",
 		"****\nid : bob\n",
@@ -775,9 +776,9 @@ func issue718Graph() []quad.Quad {
 	return quads
 }
 
-func issue718Nodes() []interface{} {
-	var nodes []interface{}
-	nodes = append(nodes, newIDDocument("a"), newIDDocument("b"))
+func issue718Nodes() []string {
+	var nodes []string
+	nodes = append(nodes, "<a>", "<b>")
 	for i := 0; i < issue718Limit-2; i++ {
 		n := fmt.Sprintf("<n%d>", i+1)
 		nodes = append(nodes, n)
