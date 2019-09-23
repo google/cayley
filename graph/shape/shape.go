@@ -9,7 +9,7 @@ import (
 	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 var (
@@ -663,6 +663,16 @@ func (s QuadsAction) simplify() NodesFrom {
 		q = append(q, QuadFilter{Dir: dir, Values: Save{From: AllNodes{}, Tags: tags}})
 	}
 	return NodesFrom{Dir: s.Result, Quads: q}
+}
+func (s QuadsAction) SimplifyFrom(quads Shape) Shape {
+	q := make(Quads, 0, len(s.Save))
+	for dir, tags := range s.Save {
+		q = append(q, QuadFilter{Dir: dir, Values: Save{From: AllNodes{}, Tags: tags}})
+	}
+	if len(q) != 0 {
+		quads = IntersectShapes(quads, q)
+	}
+	return NodesFrom{Dir: s.Result, Quads: quads}
 }
 func (s QuadsAction) Simplify() Shape {
 	return s.simplify()

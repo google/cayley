@@ -13,8 +13,8 @@ import (
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/kv"
 	"github.com/cayleygraph/cayley/graph/kv/btree"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/writer"
+	"github.com/cayleygraph/quad"
 	hkv "github.com/hidal-go/hidalgo/kv"
 	"github.com/stretchr/testify/require"
 )
@@ -46,9 +46,11 @@ func key(b string, k []byte) hkv.Key {
 	return hkv.Key{[]byte(b), k}
 }
 
-func be(v uint64) []byte {
-	var b [8]byte
-	binary.BigEndian.PutUint64(b[:], uint64(v))
+func be(v ...uint64) []byte {
+	b := make([]byte, 8*len(v))
+	for i, vi := range v {
+		binary.BigEndian.PutUint64(b[i*8:], vi)
+	}
 	return b[:]
 }
 func le(v uint64) []byte {
@@ -67,6 +69,8 @@ var (
 	vVers = le(2)
 
 	vAuto = []byte("auto")
+
+	kIndexes = []byte("indexes")
 )
 
 type Ops []kvOp
@@ -126,9 +130,10 @@ func TestApplyDeltas(t *testing.T) {
 		{opGet, key(bMeta, kVers), nil, hkv.ErrNotFound},
 		{opPut, key(bMeta, []byte{}), nil, nil},
 		{opPut, key(bLog, []byte{}), nil, nil},
-		{opPut, key("s", []byte{}), nil, nil},
-		{opPut, key("o", []byte{}), nil, nil},
+		{opPut, key("sp", []byte{}), nil, nil},
+		{opPut, key("ops", []byte{}), nil, nil},
 		{opPut, key(bMeta, kVers), vVers, nil},
+		{opPut, key(bMeta, kIndexes), []byte(`[{"dirs":"AQI=","unique":false},{"dirs":"AwIB","unique":false}]`), nil},
 	})
 
 	qs, err := kv.New(hook, nil)
@@ -137,6 +142,8 @@ func TestApplyDeltas(t *testing.T) {
 
 	expect(Ops{
 		{opGet, key(bMeta, kVers), vVers, nil},
+		{opGet, key(bMeta, kIndexes), []byte(`[{"dirs":"AQI=","unique":false},{"dirs":"AwIB","unique":false}]`), nil},
+		{opGet, key(bMeta, []byte("size")), nil, hkv.ErrNotFound},
 	})
 
 	qw, err := writer.NewSingle(qs, graph.IgnoreOpts{})
@@ -146,9 +153,6 @@ func TestApplyDeltas(t *testing.T) {
 	require.NoError(t, err)
 
 	expect(Ops{
-		{opGet, key(irib("a"), irih("a")), nil, nil},
-		{opGet, key(irib("b"), irih("b")), nil, nil},
-		{opGet, key(irib("c"), irih("c")), nil, nil},
 		{opGet, key(bMeta, []byte("horizon")), nil, hkv.ErrNotFound},
 		{opPut, key(bMeta, []byte("horizon")), le(3), nil},
 
@@ -159,9 +163,6 @@ func TestApplyDeltas(t *testing.T) {
 		{opPut, key(irib("c"), irih("c")), vAuto, nil},
 		{opPut, key(bLog, be(3)), vAuto, nil},
 
-		{opGet, key(iric("a"), irih("a")), nil, nil},
-		{opGet, key(iric("b"), irih("b")), nil, nil},
-		{opGet, key(iric("c"), irih("c")), nil, nil},
 		{opPut, key(iric("a"), irih("a")), hex("01"), nil},
 		{opPut, key(iric("b"), irih("b")), hex("01"), nil},
 		{opPut, key(iric("c"), irih("c")), hex("01"), nil},
@@ -170,10 +171,8 @@ func TestApplyDeltas(t *testing.T) {
 		{opPut, key(bLog, be(4)), vAuto, nil},
 		{opGet, key(bMeta, []byte("size")), nil, hkv.ErrNotFound},
 		{opPut, key(bMeta, []byte("size")), le(1), nil},
-		{opGet, key("o", be(3)), nil, nil},
-		{opPut, key("o", be(3)), hex("04"), nil},
-		{opGet, key("s", be(1)), nil, nil},
-		{opPut, key("s", be(1)), hex("04"), nil},
+		{opPut, key("ops", be(3, 2, 1)), hex("04"), nil},
+		{opPut, key("sp", be(1, 2)), hex("04"), nil},
 	})
 
 	err = qw.AddQuad(quad.MakeIRI("a", "b", "e", ""))
@@ -183,7 +182,6 @@ func TestApplyDeltas(t *testing.T) {
 		// served from IRI cache
 		//{opGet, irib("a"), irih("a"), vAuto, nil},
 		//{opGet, irib("b"), irih("b"), vAuto, nil},
-		{opGet, key(irib("e"), irih("e")), nil, nil},
 		{opGet, key(bMeta, []byte("horizon")), le(4), nil},
 		{opPut, key(bMeta, []byte("horizon")), le(5), nil},
 
@@ -192,7 +190,6 @@ func TestApplyDeltas(t *testing.T) {
 
 		{opGet, key(iric("a"), irih("a")), hex("01"), nil},
 		{opGet, key(iric("b"), irih("b")), hex("01"), nil},
-		{opGet, key(iric("e"), irih("e")), nil, nil},
 		{opPut, key(iric("a"), irih("a")), hex("02"), nil},
 		{opPut, key(iric("b"), irih("b")), hex("02"), nil},
 		{opPut, key(iric("e"), irih("e")), hex("01"), nil},
@@ -201,16 +198,15 @@ func TestApplyDeltas(t *testing.T) {
 		{opPut, key(bLog, be(6)), vAuto, nil},
 		{opGet, key(bMeta, []byte("size")), le(1), nil},
 		{opPut, key(bMeta, []byte("size")), le(2), nil},
-		{opGet, key("o", be(5)), nil, nil},
-		{opPut, key("o", be(5)), hex("06"), nil},
-		{opGet, key("s", be(1)), hex("04"), nil},
-		{opPut, key("s", be(1)), hex("0406"), nil},
+		{opPut, key("ops", be(5, 2, 1)), hex("06"), nil},
+		{opGet, key("sp", be(1, 2)), hex("04"), nil},
+		{opPut, key("sp", be(1, 2)), hex("0406"), nil},
 	})
 
 	err = qw.RemoveQuad(quad.MakeIRI("a", "b", "c", ""))
 	expect(Ops{
-		{opGet, key("s", be(1)), hex("0406"), nil},
-		{opGet, key("o", be(3)), hex("04"), nil},
+		{opGet, key("sp", be(1, 2)), hex("0406"), nil},
+		{opGet, key("ops", be(3, 2, 1)), hex("04"), nil},
 		{opGet, key(bLog, be(4)), vAuto, nil},
 		{opPut, key(bLog, be(4)), vAuto, nil},
 		{opGet, key(bMeta, []byte("size")), le(2), nil},

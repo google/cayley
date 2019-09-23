@@ -19,31 +19,34 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/cayleygraph/cayley/cmd/cayley/command"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/cayleygraph/cayley/clog"
 	_ "github.com/cayleygraph/cayley/clog/glog"
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/version"
+	"github.com/cayleygraph/quad"
 
 	// Load supported backends
 	_ "github.com/cayleygraph/cayley/graph/all"
 
 	// Load all supported quad formats.
-	_ "github.com/cayleygraph/cayley/quad/dot"
-	_ "github.com/cayleygraph/cayley/quad/gml"
-	_ "github.com/cayleygraph/cayley/quad/graphml"
-	_ "github.com/cayleygraph/cayley/quad/json"
-	_ "github.com/cayleygraph/cayley/quad/jsonld"
-	_ "github.com/cayleygraph/cayley/quad/nquads"
-	_ "github.com/cayleygraph/cayley/quad/pquads"
+	_ "github.com/cayleygraph/quad/dot"
+	_ "github.com/cayleygraph/quad/gml"
+	_ "github.com/cayleygraph/quad/graphml"
+	_ "github.com/cayleygraph/quad/json"
+	_ "github.com/cayleygraph/quad/jsonld"
+	_ "github.com/cayleygraph/quad/nquads"
+	_ "github.com/cayleygraph/quad/pquads"
 
 	// Load writer registry
 	_ "github.com/cayleygraph/cayley/writer"
@@ -79,6 +82,20 @@ var (
 			graph.IgnoreDuplicates = viper.GetBool("load.ignore_duplicates")
 			graph.IgnoreMissing = viper.GetBool("load.ignore_missing")
 			quad.DefaultBatch = viper.GetInt("load.batch")
+			if host, _ := cmd.Flags().GetString("pprof"); host != "" {
+				go func() {
+					if err := http.ListenAndServe(host, nil); err != nil {
+						clog.Errorf("failed to run pprof handler: %v", err)
+					}
+				}()
+			}
+			if host, _ := cmd.Flags().GetString("metrics"); host != "" {
+				go func() {
+					if err := http.ListenAndServe(host, promhttp.Handler()); err != nil {
+						clog.Errorf("failed to run metrics handler: %v", err)
+					}
+				}()
+			}
 			return nil
 		},
 	}
@@ -139,6 +156,9 @@ func init() {
 
 	rootCmd.PersistentFlags().String("memprofile", "", "path to output memory profile")
 	rootCmd.PersistentFlags().String("cpuprofile", "", "path to output cpu profile")
+
+	rootCmd.PersistentFlags().String("pprof", "", "host to serve pprof on (disabled by default)")
+	rootCmd.PersistentFlags().String("metrics", "", "host to serve metrics on (disabled by default)")
 
 	// bind flags to config variables
 	viper.BindPFlag(command.KeyBackend, rootCmd.PersistentFlags().Lookup("db"))

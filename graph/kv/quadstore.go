@@ -17,16 +17,19 @@ package kv
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/proto"
+	"github.com/cayleygraph/cayley/graph/shape"
 	"github.com/cayleygraph/cayley/internal/lru"
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/quad/pquads"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/pquads"
 	"github.com/hidal-go/hidalgo/kv"
 	boom "github.com/tylertreat/BoomFilters"
 )
@@ -76,11 +79,14 @@ func Register(name string, r Registration) {
 }
 
 const (
-	latestDataVersion = 2
-	nilDataVersion    = 1
+	latestDataVersion   = 2
+	envKVDefaultIndexes = "CAYLEY_KV_INDEXES"
 )
 
-var _ graph.BatchQuadStore = (*QuadStore)(nil)
+var (
+	_ graph.BatchQuadStore = (*QuadStore)(nil)
+	_ shape.Optimizer      = (*QuadStore)(nil)
+)
 
 type QuadStore struct {
 	db kv.KV
@@ -96,6 +102,8 @@ type QuadStore struct {
 
 	writer    sync.Mutex
 	mapBucket map[string]map[string][]uint64
+	mapBloom  map[string]*boom.BloomFilter
+	mapNodes  *boom.BloomFilter
 
 	exists struct {
 		disabled bool
@@ -106,14 +114,21 @@ type QuadStore struct {
 }
 
 func newQuadStore(kv kv.KV) *QuadStore {
-	qs := &QuadStore{db: kv}
-	qs.indexes.all = DefaultQuadIndexes
-	return qs
+	return &QuadStore{db: kv}
 }
 
 func Init(kv kv.KV, opt graph.Options) error {
 	ctx := context.TODO()
 	qs := newQuadStore(kv)
+	if data := os.Getenv(envKVDefaultIndexes); data != "" {
+		qs.indexes.all = nil
+		if err := json.Unmarshal([]byte(data), &qs.indexes); err != nil {
+			return err
+		}
+	}
+	if qs.indexes.all == nil {
+		qs.indexes.all = DefaultQuadIndexes
+	}
 	if _, err := qs.getMetadata(ctx); err == nil {
 		return graph.ErrDatabaseExists
 	} else if err != ErrNoBucket {
@@ -127,6 +142,9 @@ func Init(kv kv.KV, opt graph.Options) error {
 		return err
 	}
 	if err := setVersion(ctx, qs.db, latestDataVersion); err != nil {
+		return err
+	}
+	if err := qs.writeIndexesMeta(ctx); err != nil {
 		return err
 	}
 	return nil
@@ -146,10 +164,23 @@ func New(kv kv.KV, opt graph.Options) (graph.QuadStore, error) {
 	} else if vers != latestDataVersion {
 		return nil, errors.New("kv: data version is out of date. Run cayleyupgrade for your config to update the data.")
 	}
+	if list, err := qs.readIndexesMeta(ctx); err != nil {
+		return nil, err
+	} else {
+		qs.indexes.all = list
+	}
 	qs.valueLRU = lru.New(2000)
 	qs.exists.disabled, _ = opt.BoolKey(OptNoBloom, false)
 	if err := qs.initBloomFilter(ctx); err != nil {
 		return nil, err
+	}
+	if !qs.exists.disabled {
+		if sz, err := qs.getSize(); err != nil {
+			return nil, err
+		} else if sz == 0 {
+			qs.mapBloom = make(map[string]*boom.BloomFilter)
+			qs.mapNodes = boom.NewBloomFilter(100*1000*1000, 0.05)
+		}
 	}
 	return qs, nil
 }
@@ -183,8 +214,16 @@ func (qs *QuadStore) getMetaInt(ctx context.Context, key string) (int64, error) 
 	return v, err
 }
 
+func (qs *QuadStore) getSize() (int64, error) {
+	sz, err := qs.getMetaInt(context.TODO(), "size")
+	if err == ErrNoBucket {
+		return 0, nil
+	}
+	return sz, err
+}
+
 func (qs *QuadStore) Size() int64 {
-	sz, _ := qs.getMetaInt(context.TODO(), "size")
+	sz, _ := qs.getSize()
 	return sz
 }
 
@@ -232,7 +271,7 @@ func (qs *QuadStore) getMetadata(ctx context.Context) (int64, error) {
 		} else if err != nil {
 			return err
 		}
-		vers, err = asInt64(val, nilDataVersion)
+		vers, err = asInt64(val, 0)
 		if err != nil {
 			return err
 		}
@@ -417,6 +456,7 @@ func (qs *QuadStore) getPrimitives(ctx context.Context, vals []uint64) ([]*proto
 		return nil, err
 	}
 	defer tx.Close()
+	tx = wrapTx(tx)
 	return qs.getPrimitivesFromLog(ctx, tx, vals)
 }
 

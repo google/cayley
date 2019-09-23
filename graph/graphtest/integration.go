@@ -93,7 +93,7 @@ var queries = []struct {
 	{
 		message: "name predicate",
 		query: `
-		g.V("Humphrey Bogart").In("<name>").All()
+		g.V("Humphrey Bogart").in("<name>").all()
 		`,
 		expect: []interface{}{
 			map[string]string{"id": "</en/humphrey_bogart>"},
@@ -106,11 +106,11 @@ var queries = []struct {
 	{
 		message: "two large sets with no intersection",
 		query: `
-		function getId(x) { return g.V(x).In("<name>") }
-		var actor_to_film = g.M().In("</film/performance/actor>").In("</film/film/starring>")
+		function getId(x) { return g.V(x).in("<name>") }
+		var actor_to_film = g.M().in("</film/performance/actor>").in("</film/film/starring>")
 
-		getId("Oliver Hardy").Follow(actor_to_film).Out("<name>").Intersect(
-			getId("Mel Blanc").Follow(actor_to_film).Out("<name>")).All()
+		getId("Oliver Hardy").follow(actor_to_film).out("<name>").intersect(
+			getId("Mel Blanc").follow(actor_to_film).out("<name>")).all()
 			`,
 		expect: nil,
 	},
@@ -120,19 +120,19 @@ var queries = []struct {
 		message: "three huge sets with small intersection",
 		long:    true,
 		query: `
-			function getId(x) { return g.V(x).In("<name>") }
-			var actor_to_film = g.M().In("</film/performance/actor>").In("</film/film/starring>")
+			function getId(x) { return g.V(x).in("<name>") }
+			var actor_to_film = g.M().in("</film/performance/actor>").in("</film/film/starring>")
 
-			var a = getId("Oliver Hardy").Follow(actor_to_film).FollowR(actor_to_film)
-			var b = getId("Mel Blanc").Follow(actor_to_film).FollowR(actor_to_film)
-			var c = getId("Billy Gilbert").Follow(actor_to_film).FollowR(actor_to_film)
+			var a = getId("Oliver Hardy").follow(actor_to_film).followR(actor_to_film)
+			var b = getId("Mel Blanc").follow(actor_to_film).followR(actor_to_film)
+			var c = getId("Billy Gilbert").follow(actor_to_film).followR(actor_to_film)
 
 			seen = {}
 
-			a.Intersect(b).Intersect(c).ForEach(function (d) {
+			a.intersect(b).intersect(c).forEach(function (d) {
 				if (!(d.id in seen)) {
 					seen[d.id] = true;
-					g.Emit(d)
+					g.emit(d)
 				}
 			})
 			`,
@@ -149,7 +149,7 @@ var queries = []struct {
 		message: "the helpless checker",
 		long:    true,
 		query: `
-			g.V().As("person").In("<name>").In().In().Out("<name>").Is("Casablanca").All()
+			g.V().as("person").in("<name>").in().in().out("<name>").is("Casablanca").all()
 			`,
 		tag: "person",
 		expect: []interface{}{
@@ -176,7 +176,7 @@ var queries = []struct {
 		message: "the helpless checker, negated (films without Ingrid Bergman)",
 		long:    true,
 		query: `
-			g.V().As("person").In("<name>").In().In().Out("<name>").Except(g.V("Ingrid Bergman").In("<name>").In().In().Out("<name>")).Is("Casablanca").All()
+			g.V().as("person").in("<name>").in().in().out("<name>").except(g.V("Ingrid Bergman").in("<name>").in().in().out("<name>")).is("Casablanca").all()
 			`,
 		tag:    "person",
 		expect: nil,
@@ -185,7 +185,7 @@ var queries = []struct {
 		message: "the helpless checker, negated (without actors Ingrid Bergman)",
 		long:    true,
 		query: `
-			g.V().As("person").In("<name>").Except(g.V("Ingrid Bergman").In("<name>")).In().In().Out("<name>").Is("Casablanca").All()
+			g.V().as("person").in("<name>").except(g.V("Ingrid Bergman").in("<name>")).in().in().out("<name>").is("Casablanca").all()
 			`,
 		tag: "person",
 		expect: []interface{}{
@@ -210,7 +210,7 @@ var queries = []struct {
 	//A: "Sandra Bullock"
 	{
 		message: "Net and Speed",
-		query: common + `m1_actors.Intersect(m2_actors).Out("<name>").All()
+		query: common + `m1_actors.intersect(m2_actors).out("<name>").all()
 `,
 		expect: []interface{}{
 			map[string]string{"id": SandraB, "movie1": "The Net", "movie2": nSpeed},
@@ -221,7 +221,7 @@ var queries = []struct {
 	//A: No
 	{
 		message: "Keanu in The Net",
-		query: common + `actor2.Intersect(m1_actors).Out("<name>").All()
+		query: common + `actor2.intersect(m1_actors).out("<name>").all()
 `,
 		expect: nil,
 	},
@@ -230,7 +230,7 @@ var queries = []struct {
 	//A: Yes
 	{
 		message: "Keanu in Speed",
-		query: common + `actor2.Intersect(m2_actors).Out("<name>").All()
+		query: common + `actor2.intersect(m2_actors).out("<name>").all()
 `,
 		expect: []interface{}{
 			map[string]string{"id": KeanuR, "movie2": nSpeed},
@@ -243,7 +243,7 @@ var queries = []struct {
 	{
 		message: "Keanu with other in The Net",
 		long:    true,
-		query: common + `actor2.Follow(coStars1).Intersect(m1_actors).Out("<name>").All()
+		query: common + `actor2.follow(coStars1).intersect(m1_actors).out("<name>").all()
 `,
 		expect: []interface{}{
 			map[string]string{"id": SandraB, "movie1": "The Net", "costar1_movie": nSpeed},
@@ -257,7 +257,7 @@ var queries = []struct {
 	{
 		message: "Keanu and Bullock with other",
 		long:    true,
-		query: common + `actor1.Save("<name>","costar1_actor").Follow(coStars1).Intersect(actor2.Save("<name>","costar2_actor").Follow(coStars2)).Out("<name>").All()
+		query: common + `actor1.save("<name>","costar1_actor").follow(coStars1).intersect(actor2.save("<name>","costar2_actor").follow(coStars2)).out("<name>").all()
 `,
 		expect: []interface{}{
 			costarTag(SandraB, SandraB, "The Proposal", KeanuR, nSpeed),
@@ -431,7 +431,7 @@ var queries = []struct {
 	{
 		message: "Save a number of predicates around a set of nodes",
 		query: `
-		g.V("_:9037", "_:49278", "_:44112", "_:44709", "_:43382").Save("</film/performance/character>", "char").Save("</film/performance/actor>", "act").SaveR("</film/film/starring>", "film").All()
+		g.V("_:9037", "_:49278", "_:44112", "_:44709", "_:43382").save("</film/performance/character>", "char").save("</film/performance/actor>", "act").saveR("</film/film/starring>", "film").all()
 		`,
 		expect: []interface{}{
 			map[string]interface{}{
@@ -469,21 +469,21 @@ var queries = []struct {
 }
 
 const common = `
-var movie1 = g.V().Has("<name>", "The Net")
-var movie2 = g.V().Has("<name>", "Speed")
-var actor1 = g.V().Has("<name>", "Sandra Bullock")
-var actor2 = g.V().Has("<name>", "Keanu Reeves")
+var movie1 = g.V().has("<name>", "The Net")
+var movie2 = g.V().has("<name>", "Speed")
+var actor1 = g.V().has("<name>", "Sandra Bullock")
+var actor2 = g.V().has("<name>", "Keanu Reeves")
 
 // (film) -> starring -> (actor)
-var filmToActor = g.Morphism().Out("</film/film/starring>").Out("</film/performance/actor>")
+var filmToActor = g.Morphism().out("</film/film/starring>").out("</film/performance/actor>")
 
 // (actor) -> starring -> [film -> starring -> (actor)]
-var coStars1 = g.Morphism().In("</film/performance/actor>").In("</film/film/starring>").Save("<name>","costar1_movie").Follow(filmToActor)
-var coStars2 = g.Morphism().In("</film/performance/actor>").In("</film/film/starring>").Save("<name>","costar2_movie").Follow(filmToActor)
+var coStars1 = g.Morphism().in("</film/performance/actor>").in("</film/film/starring>").save("<name>","costar1_movie").follow(filmToActor)
+var coStars2 = g.Morphism().in("</film/performance/actor>").in("</film/film/starring>").save("<name>","costar2_movie").follow(filmToActor)
 
 // Stars for the movies "The Net" and "Speed"
-var m1_actors = movie1.Save("<name>","movie1").Follow(filmToActor)
-var m2_actors = movie2.Save("<name>","movie2").Follow(filmToActor)
+var m1_actors = movie1.save("<name>","movie1").follow(filmToActor)
+var m2_actors = movie2.save("<name>","movie2").follow(filmToActor)
 `
 
 func prepare(t testing.TB, gen testutil.DatabaseFunc) (graph.QuadStore, func()) {
@@ -533,26 +533,22 @@ func checkQueries(t *testing.T, qs graph.QuadStore, timeout time.Duration) {
 			}
 			start := time.Now()
 			ses := gizmo.NewSession(qs)
-			c := make(chan query.Result, 5)
 			ctx := context.Background()
 			if timeout > 0 {
 				var cancel func()
 				ctx, cancel = context.WithTimeout(ctx, timeout)
 				defer cancel()
 			}
-			go ses.Execute(ctx, test.query, c, -1)
+			it, err := ses.Execute(ctx, test.query, query.Options{
+				Collation: query.JSON,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer it.Close()
 			var got []interface{}
-			for r := range c {
-				if err := r.Err(); err != nil {
-					t.Error("Error:", err)
-					continue
-				}
-				ses.Collate(r)
-				j, err := ses.Results()
-				if j == nil && err == nil {
-					continue
-				}
-				got = append(got, j.([]interface{})...)
+			for it.Next(ctx) {
+				got = append(got, it.Result())
 			}
 			t.Logf("%12v %v", time.Since(start), test.message)
 
@@ -600,26 +596,34 @@ func benchmarkQueries(b *testing.B, gen testutil.DatabaseFunc) {
 			b.StopTimer()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				c := make(chan query.Result, 5)
-				ctx := context.Background()
-				var cancel func()
-				if timeout > 0 {
-					ctx, cancel = context.WithTimeout(ctx, timeout)
-				}
-				ses := gizmo.NewSession(qs)
-				b.StartTimer()
-				go ses.Execute(ctx, bench.query, c, -1)
-				n := 0
-				for range c {
-					n++
-				}
-				b.StopTimer()
-				if n != len(bench.expect) {
-					b.Fatalf("unexpected number of results: %d vs %d", n, len(bench.expect))
-				}
-				if cancel != nil {
-					cancel()
-				}
+				func() {
+					ctx := context.Background()
+					if timeout > 0 {
+						var cancel func()
+						ctx, cancel = context.WithTimeout(ctx, timeout)
+						defer cancel()
+					}
+					ses := gizmo.NewSession(qs)
+					b.StartTimer()
+					it, err := ses.Execute(ctx, bench.query, query.Options{
+						Collation: query.Raw,
+					})
+					if err != nil {
+						b.Fatal(err)
+					}
+					defer it.Close()
+					n := 0
+					for it.Next(ctx) {
+						n++
+					}
+					if err = it.Err(); err != nil {
+						b.Fatal(err)
+					}
+					b.StopTimer()
+					if n != len(bench.expect) {
+						b.Fatalf("unexpected number of results: %d vs %d", n, len(bench.expect))
+					}
+				}()
 			}
 		})
 	}
