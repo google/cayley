@@ -57,5 +57,3 @@ require (
 )
 
 replace github.com/Sirupsen/logrus => github.com/Sirupsen/logrus v1.0.1
-
-go 1.13
