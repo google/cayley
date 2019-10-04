@@ -10,11 +10,12 @@ import (
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
 	"github.com/cayleygraph/cayley/graph/kv"
 	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
+	hkv "github.com/hidal-go/hidalgo/kv"
 	"github.com/stretchr/testify/require"
 )
 
-type DatabaseFunc func(t testing.TB) (kv.BucketKV, graph.Options, func())
+type DatabaseFunc func(t testing.TB) (hkv.KV, graph.Options, func())
 
 type Config struct {
 	AlwaysRunIntegration bool
@@ -114,10 +115,10 @@ func testOptimize(t *testing.T, gen DatabaseFunc, _ *Config) {
 	}
 
 	oldIt.Next(ctx)
-	oldResults := make(map[string]graph.Value)
+	oldResults := make(map[string]graph.Ref)
 	oldIt.TagResults(oldResults)
 	newIt.Next(ctx)
-	newResults := make(map[string]graph.Value)
+	newResults := make(map[string]graph.Ref)
 	newIt.TagResults(newResults)
 	if !reflect.DeepEqual(newResults, oldResults) {
 		t.Errorf("Discordant tag results, new:%v old:%v", newResults, oldResults)

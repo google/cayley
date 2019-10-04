@@ -20,14 +20,12 @@ import (
 
 	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 
 	"google.golang.org/appengine/datastore"
 )
 
 type Iterator struct {
-	uid    uint64
 	size   int64
 	dir    quad.Direction
 	qs     *QuadStore
@@ -39,7 +37,7 @@ type Iterator struct {
 	buffer []string
 	offset int
 	last   string
-	result graph.Value
+	result graph.Ref
 	err    error
 }
 
@@ -47,7 +45,7 @@ var (
 	bufferSize = 50
 )
 
-func NewIterator(qs *QuadStore, k string, d quad.Direction, val graph.Value) *Iterator {
+func NewIterator(qs *QuadStore, k string, d quad.Direction, val graph.Ref) *Iterator {
 	t := val.(*Token)
 	if t == nil {
 		clog.Errorf("Token == nil")
@@ -77,7 +75,6 @@ func NewIterator(qs *QuadStore, k string, d quad.Direction, val graph.Value) *It
 	size := foundNode.Size
 
 	return &Iterator{
-		uid:   iterator.NextUID(),
 		name:  name,
 		dir:   d,
 		qs:    qs,
@@ -99,26 +96,22 @@ func NewAllIterator(qs *QuadStore, kind string) *Iterator {
 		return &Iterator{done: true}
 	}
 
+	st, err := qs.Stats(context.Background(), true)
 	var size int64
 	if kind == nodeKind {
-		size = qs.NodeSize()
+		size = st.Nodes.Size
 	} else {
-		size = qs.Size()
+		size = st.Quads.Size
 	}
-
 	return &Iterator{
-		uid:   iterator.NextUID(),
 		qs:    qs,
 		size:  size,
+		err:   err,
 		dir:   quad.Any,
 		isAll: true,
 		kind:  kind,
-		done:  false,
+		done:  err != nil,
 	}
-}
-
-func (it *Iterator) UID() uint64 {
-	return it.uid
 }
 
 func (it *Iterator) Reset() {
@@ -138,7 +131,7 @@ func (it *Iterator) Close() error {
 	return nil
 }
 
-func (it *Iterator) Contains(ctx context.Context, v graph.Value) bool {
+func (it *Iterator) Contains(ctx context.Context, v graph.Ref) bool {
 	if it.isAll {
 		// The result needs to be set, so when contains is called, the result can be retrieved
 		it.result = v
@@ -172,7 +165,7 @@ func (it *Iterator) Contains(ctx context.Context, v graph.Value) bool {
 	return false
 }
 
-func (it *Iterator) TagResults(dst map[string]graph.Value) {}
+func (it *Iterator) TagResults(dst map[string]graph.Ref) {}
 
 func (it *Iterator) NextPath(ctx context.Context) bool {
 	return false
@@ -183,7 +176,7 @@ func (it *Iterator) SubIterators() []graph.Iterator {
 	return nil
 }
 
-func (it *Iterator) Result() graph.Value {
+func (it *Iterator) Result() graph.Ref {
 	return it.result
 }
 

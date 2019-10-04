@@ -18,7 +18,7 @@ import (
 	"regexp"
 
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 func newRegex(qs graph.Namer, sub graph.Iterator, re *regexp.Regexp, refs bool) graph.Iterator {
@@ -26,6 +26,8 @@ func newRegex(qs graph.Namer, sub graph.Iterator, re *regexp.Regexp, refs bool) 
 		switch v := v.(type) {
 		case quad.String:
 			return re.MatchString(string(v)), nil
+		case quad.LangString:
+			return re.MatchString(string(v.Value)), nil
 		case quad.TypedString:
 			return re.MatchString(string(v.Value)), nil
 		default:

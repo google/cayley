@@ -5,7 +5,7 @@ import (
 	"sort"
 
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 type Op interface {
@@ -38,6 +38,41 @@ type Deltas struct {
 	DecNode []NodeUpdate
 	QuadAdd []QuadUpdate
 	QuadDel []QuadUpdate
+}
+
+func InsertQuads(in []quad.Quad) *Deltas {
+	hnodes := make(map[graph.ValueHash]*NodeUpdate, len(in)*2)
+	quadAdd := make([]QuadUpdate, 0, len(in))
+	for i, qd := range in {
+		var q graph.QuadHash
+		for _, dir := range quad.Directions {
+			v := qd.Get(dir)
+			if v == nil {
+				continue
+			}
+			h := graph.HashOf(v)
+			q.Set(dir, h)
+			n := hnodes[h]
+			if n == nil {
+				n = &NodeUpdate{Hash: h, Val: v}
+				hnodes[h] = n
+			}
+			n.RefInc++
+		}
+		quadAdd = append(quadAdd, QuadUpdate{Ind: i, Quad: q})
+	}
+	incNodes := make([]NodeUpdate, 0, len(hnodes))
+	for _, n := range hnodes {
+		incNodes = append(incNodes, *n)
+	}
+	hnodes = nil
+	sort.Slice(incNodes, func(i, j int) bool {
+		return bytes.Compare(incNodes[i].Hash[:], incNodes[j].Hash[:]) < 0
+	})
+	return &Deltas{
+		IncNode: incNodes,
+		QuadAdd: quadAdd,
+	}
 }
 
 func SplitDeltas(in []graph.Delta) *Deltas {

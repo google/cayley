@@ -6,13 +6,14 @@ import (
 	"fmt"
 
 	"github.com/cayleygraph/cayley/clog"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 // IterateChain is a chain-enabled helper to setup iterator execution.
 type IterateChain struct {
 	ctx context.Context
-	it  Iterator
+	s   IteratorShape
+	it  Scanner
 	qs  QuadStore
 
 	paths    bool
@@ -31,7 +32,7 @@ func Iterate(ctx context.Context, it Iterator) *IterateChain {
 		ctx = context.Background()
 	}
 	return &IterateChain{
-		ctx: ctx, it: it,
+		ctx: ctx, s: AsShape(it),
 		limit: -1, paths: true,
 		optimize: true,
 	}
@@ -62,12 +63,13 @@ func (c *IterateChain) nextPath() bool {
 }
 func (c *IterateChain) start() {
 	if c.optimize {
-		c.it, _ = c.it.Optimize()
+		c.s, _ = c.s.Optimize(c.ctx)
 	}
+	c.it = c.s.Iterate()
 	if !clog.V(2) {
 		return
 	}
-	if b, err := json.MarshalIndent(DescribeIterator(c.it), "", "  "); err != nil {
+	if b, err := json.MarshalIndent(DescribeIterator(AsLegacy(c.s)), "", "  "); err != nil {
 		clog.Infof("failed to format description: %v", err)
 	} else {
 		clog.Infof("%s", b)
@@ -78,7 +80,7 @@ func (c *IterateChain) end() {
 	if !clog.V(2) {
 		return
 	}
-	if b, err := json.MarshalIndent(DumpStats(c.it), "", "  "); err != nil {
+	if b, err := json.MarshalIndent(DumpStats(AsLegacy(c.s)), "", "  "); err != nil {
 		clog.Infof("failed to format stats: %v", err)
 	} else {
 		clog.Infof("%s", b)
@@ -111,7 +113,7 @@ func (c *IterateChain) UnOptimized() *IterateChain {
 }
 
 // Each will run a provided callback for each result of the iterator.
-func (c *IterateChain) Each(fnc func(Value)) error {
+func (c *IterateChain) Each(fnc func(Ref)) error {
 	c.start()
 	defer c.end()
 	done := c.ctx.Done()
@@ -137,13 +139,19 @@ func (c *IterateChain) Each(fnc func(Value)) error {
 
 // All will return all results of an iterator.
 func (c *IterateChain) Count() (int64, error) {
+	// TODO(dennwc): this should wrap the shape in Count
+	if c.optimize {
+		c.s, _ = c.s.Optimize(c.ctx)
+	}
+	if st, err := c.s.Stats(c.ctx); err != nil {
+		return st.Size.Size, err
+	} else if st.Size.Exact {
+		return st.Size.Size, nil
+	}
 	c.start()
 	defer c.end()
 	if err := c.it.Err(); err != nil {
 		return 0, err
-	}
-	if size, exact := c.it.Size(); exact {
-		return size, nil
 	}
 	done := c.ctx.Done()
 	var cnt int64
@@ -168,11 +176,11 @@ iteration:
 }
 
 // All will return all results of an iterator.
-func (c *IterateChain) All() ([]Value, error) {
+func (c *IterateChain) All() ([]Ref, error) {
 	c.start()
 	defer c.end()
 	done := c.ctx.Done()
-	var out []Value
+	var out []Ref
 iteration:
 	for c.next() {
 		select {
@@ -194,7 +202,7 @@ iteration:
 }
 
 // First will return a first result of an iterator. It returns nil if iterator is empty.
-func (c *IterateChain) First() (Value, error) {
+func (c *IterateChain) First() (Ref, error) {
 	c.start()
 	defer c.end()
 	if !c.next() {
@@ -206,7 +214,7 @@ func (c *IterateChain) First() (Value, error) {
 // Send will send each result of the iterator to the provided channel.
 //
 // Channel will NOT be closed when function returns.
-func (c *IterateChain) Send(out chan<- Value) error {
+func (c *IterateChain) Send(out chan<- Ref) error {
 	c.start()
 	defer c.end()
 	done := c.ctx.Done()
@@ -228,7 +236,7 @@ func (c *IterateChain) Send(out chan<- Value) error {
 }
 
 // TagEach will run a provided tag map callback for each result of the iterator.
-func (c *IterateChain) TagEach(fnc func(map[string]Value)) error {
+func (c *IterateChain) TagEach(fnc func(map[string]Ref)) error {
 	c.start()
 	defer c.end()
 	done := c.ctx.Done()
@@ -240,7 +248,7 @@ func (c *IterateChain) TagEach(fnc func(map[string]Value)) error {
 			return c.ctx.Err()
 		default:
 		}
-		tags := make(map[string]Value, mn)
+		tags := make(map[string]Ref, mn)
 		c.it.TagResults(tags)
 		if n := len(tags); n > mn {
 			mn = n
@@ -252,7 +260,7 @@ func (c *IterateChain) TagEach(fnc func(map[string]Value)) error {
 				return c.ctx.Err()
 			default:
 			}
-			tags := make(map[string]Value, mn)
+			tags := make(map[string]Ref, mn)
 			c.it.TagResults(tags)
 			if n := len(tags); n > mn {
 				mn = n
@@ -266,7 +274,7 @@ func (c *IterateChain) TagEach(fnc func(map[string]Value)) error {
 var errNoQuadStore = fmt.Errorf("no quad store in Iterate")
 
 // EachValue is an analog of Each, but it will additionally call NameOf
-// for each graph.Value before passing it to a callback.
+// for each graph.Ref before passing it to a callback.
 func (c *IterateChain) EachValue(qs QuadStore, fnc func(quad.Value)) error {
 	if qs != nil {
 		c.qs = qs
@@ -275,7 +283,7 @@ func (c *IterateChain) EachValue(qs QuadStore, fnc func(quad.Value)) error {
 		return errNoQuadStore
 	}
 	// TODO(dennwc): batch NameOf?
-	return c.Each(func(v Value) {
+	return c.Each(func(v Ref) {
 		if nv := c.qs.NameOf(v); nv != nil {
 			fnc(nv)
 		}
@@ -283,8 +291,8 @@ func (c *IterateChain) EachValue(qs QuadStore, fnc func(quad.Value)) error {
 }
 
 // EachValuePair is an analog of Each, but it will additionally call NameOf
-// for each graph.Value before passing it to a callback. Original value will be passed as well.
-func (c *IterateChain) EachValuePair(qs QuadStore, fnc func(Value, quad.Value)) error {
+// for each graph.Ref before passing it to a callback. Original value will be passed as well.
+func (c *IterateChain) EachValuePair(qs QuadStore, fnc func(Ref, quad.Value)) error {
 	if qs != nil {
 		c.qs = qs
 	}
@@ -292,7 +300,7 @@ func (c *IterateChain) EachValuePair(qs QuadStore, fnc func(Value, quad.Value)) 
 		return errNoQuadStore
 	}
 	// TODO(dennwc): batch NameOf?
-	return c.Each(func(v Value) {
+	return c.Each(func(v Ref) {
 		if nv := c.qs.NameOf(v); nv != nil {
 			fnc(v, nv)
 		}
@@ -300,7 +308,7 @@ func (c *IterateChain) EachValuePair(qs QuadStore, fnc func(Value, quad.Value)) 
 }
 
 // AllValues is an analog of All, but it will additionally call NameOf
-// for each graph.Value before returning the results slice.
+// for each graph.Ref before returning the results slice.
 func (c *IterateChain) AllValues(qs QuadStore) ([]quad.Value, error) {
 	var out []quad.Value
 	err := c.EachValue(qs, func(v quad.Value) {
@@ -326,7 +334,7 @@ func (c *IterateChain) FirstValue(qs QuadStore) (quad.Value, error) {
 }
 
 // SendValues is an analog of Send, but it will additionally call NameOf
-// for each graph.Value before sending it to a channel.
+// for each graph.Ref before sending it to a channel.
 func (c *IterateChain) SendValues(qs QuadStore, out chan<- quad.Value) error {
 	if qs != nil {
 		c.qs = qs
@@ -337,7 +345,7 @@ func (c *IterateChain) SendValues(qs QuadStore, out chan<- quad.Value) error {
 	c.start()
 	defer c.end()
 	done := c.ctx.Done()
-	send := func(v Value) error {
+	send := func(v Ref) error {
 		nv := c.qs.NameOf(c.it.Result())
 		if nv == nil {
 			return nil
@@ -363,7 +371,7 @@ func (c *IterateChain) SendValues(qs QuadStore, out chan<- quad.Value) error {
 }
 
 // TagValues is an analog of TagEach, but it will additionally call NameOf
-// for each graph.Value before passing the map to a callback.
+// for each graph.Ref before passing the map to a callback.
 func (c *IterateChain) TagValues(qs QuadStore, fnc func(map[string]quad.Value)) error {
 	if qs != nil {
 		c.qs = qs
@@ -371,7 +379,7 @@ func (c *IterateChain) TagValues(qs QuadStore, fnc func(map[string]quad.Value)) 
 	if c.qs == nil {
 		return errNoQuadStore
 	}
-	return c.TagEach(func(m map[string]Value) {
+	return c.TagEach(func(m map[string]Ref) {
 		vm := make(map[string]quad.Value, len(m))
 		for k, v := range m {
 			vm[k] = c.qs.NameOf(v) // TODO(dennwc): batch NameOf?

@@ -20,7 +20,7 @@ import (
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 // join puts two iterators together by intersecting their result sets with an AND
@@ -60,7 +60,7 @@ func isMorphism(nodes ...quad.Value) morphism {
 
 // isNodeMorphism represents all nodes passed in-- if there are none, this function
 // acts as a passthrough for the previous iterator.
-func isNodeMorphism(nodes ...graph.Value) morphism {
+func isNodeMorphism(nodes ...graph.Ref) morphism {
 	return morphism{
 		Reversal: func(ctx *pathContext) (morphism, *pathContext) { return isNodeMorphism(nodes...), ctx },
 		Apply: func(in shape.Shape, ctx *pathContext) (shape.Shape, *pathContext) {

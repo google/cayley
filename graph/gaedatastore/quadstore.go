@@ -29,7 +29,7 @@ import (
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/http"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 var _ httpgraph.QuadStore = (*QuadStore)(nil)
@@ -162,6 +162,46 @@ func getContext(opts graph.Options) (context.Context, error) {
 
 func (qs *QuadStore) ForRequest(r *http.Request) (graph.QuadStore, error) {
 	return &QuadStore{context: appengine.NewContext(r)}, nil
+}
+
+func (qs *QuadStore) NewQuadWriter() (quad.WriteCloser, error) {
+	return &quadWriter{qs: qs}, nil
+}
+
+type quadWriter struct {
+	qs     *QuadStore
+	deltas []graph.Delta
+}
+
+func (w *quadWriter) WriteQuad(q quad.Quad) error {
+	_, err := w.WriteQuads([]quad.Quad{q})
+	return err
+}
+
+func (w *quadWriter) WriteQuads(buf []quad.Quad) (int, error) {
+	// TODO(dennwc): write an optimized implementation
+	w.deltas = w.deltas[:0]
+	if cap(w.deltas) < len(buf) {
+		w.deltas = make([]graph.Delta, 0, len(buf))
+	}
+	for _, q := range buf {
+		w.deltas = append(w.deltas, graph.Delta{
+			Quad: q, Action: graph.Add,
+		})
+	}
+	err := w.qs.ApplyDeltas(w.deltas, graph.IgnoreOpts{
+		IgnoreDup: true,
+	})
+	w.deltas = w.deltas[:0]
+	if err != nil {
+		return 0, err
+	}
+	return len(buf), nil
+}
+
+func (w *quadWriter) Close() error {
+	w.deltas = nil
+	return nil
 }
 
 func (qs *QuadStore) ApplyDeltas(in []graph.Delta, ignoreOpts graph.IgnoreOpts) error {
@@ -397,7 +437,7 @@ func (qs *QuadStore) updateLog(in []graph.Delta) ([]int64, error) {
 	return out, nil
 }
 
-func (qs *QuadStore) QuadIterator(dir quad.Direction, v graph.Value) graph.Iterator {
+func (qs *QuadStore) QuadIterator(dir quad.Direction, v graph.Ref) graph.Iterator {
 	return NewIterator(qs, quadKind, dir, v)
 }
 
@@ -409,12 +449,12 @@ func (qs *QuadStore) QuadsAllIterator() graph.Iterator {
 	return NewAllIterator(qs, quadKind)
 }
 
-func (qs *QuadStore) ValueOf(s quad.Value) graph.Value {
+func (qs *QuadStore) ValueOf(s quad.Value) graph.Ref {
 	id := hashOf(s)
 	return &Token{Kind: nodeKind, Hash: id}
 }
 
-func (qs *QuadStore) NameOf(val graph.Value) quad.Value {
+func (qs *QuadStore) NameOf(val graph.Ref) quad.Value {
 	if qs.context == nil {
 		clog.Errorf("Error in NameOf, context is nil, graph not correctly initialised")
 		return nil
@@ -440,7 +480,7 @@ func (qs *QuadStore) NameOf(val graph.Value) quad.Value {
 	return quad.Raw(node.Name)
 }
 
-func (qs *QuadStore) Quad(val graph.Value) quad.Quad {
+func (qs *QuadStore) Quad(val graph.Ref) quad.Quad {
 	if qs.context == nil {
 		clog.Errorf("Error fetching quad, context is nil, graph not correctly initialised")
 		return quad.Quad{}
@@ -473,34 +513,42 @@ func (qs *QuadStore) Quad(val graph.Value) quad.Quad {
 	)
 }
 
-func (qs *QuadStore) Size() int64 {
+func (qs *QuadStore) Stats(ctx context.Context, exact bool) (graph.Stats, error) {
 	if qs.context == nil {
-		clog.Errorf("Error fetching size, context is nil, graph not correctly initialised")
-		return 0
+		return graph.Stats{}, errors.New("error fetching size, context is nil, graph not correctly initialised")
 	}
 	key := qs.createKeyForMetadata()
-	foundMetadata := new(MetadataEntry)
-	err := datastore.Get(qs.context, key, foundMetadata)
+	m := new(MetadataEntry)
+	err := datastore.Get(qs.context, key, m)
 	if err != nil {
-		clog.Warningf("Error: %v", err)
-		return 0
+		return graph.Stats{}, err
 	}
-	return foundMetadata.QuadCount
+	return graph.Stats{
+		Nodes: graph.Size{
+			Size:  m.NodeCount,
+			Exact: true,
+		},
+		Quads: graph.Size{
+			Size:  m.QuadCount,
+			Exact: true,
+		},
+	}, nil
 }
 
-func (qs *QuadStore) NodeSize() int64 {
-	if qs.context == nil {
-		clog.Errorf("Error fetching node size, context is nil, graph not correctly initialised")
-		return 0
+func (qs *QuadStore) QuadIteratorSize(ctx context.Context, d quad.Direction, val graph.Ref) (graph.Size, error) {
+	t, ok := val.(*Token)
+	if !ok || t.Kind != nodeKind {
+		return graph.Size{Size: 0, Exact: true}, nil
+	} else if qs.context == nil {
+		return graph.Size{}, errors.New("cannot count iterator without a valid context")
 	}
-	key := qs.createKeyForMetadata()
-	foundMetadata := new(MetadataEntry)
-	err := datastore.Get(qs.context, key, foundMetadata)
-	if err != nil {
-		clog.Warningf("Error: %v", err)
-		return 0
+	key := qs.createKeyFromToken(t)
+	n := new(NodeEntry)
+	err := datastore.Get(qs.context, key, n)
+	if err != nil && err != datastore.ErrNoSuchEntity {
+		return graph.Size{}, err
 	}
-	return foundMetadata.NodeCount
+	return graph.Size{Size: n.Size, Exact: true}, nil
 }
 
 func (qs *QuadStore) Close() error {
@@ -508,7 +556,7 @@ func (qs *QuadStore) Close() error {
 	return nil
 }
 
-func (qs *QuadStore) QuadDirection(val graph.Value, dir quad.Direction) graph.Value {
+func (qs *QuadStore) QuadDirection(val graph.Ref, dir quad.Direction) graph.Ref {
 	t, ok := val.(*Token)
 	if !ok {
 		clog.Errorf("Token not valid")

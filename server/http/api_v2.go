@@ -31,19 +31,19 @@ import (
 	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/query"
 	_ "github.com/cayleygraph/cayley/writer"
+	"github.com/cayleygraph/quad"
 )
 
-func NewAPIv2(h *graph.Handle) *APIv2 {
-	return NewAPIv2Writer(h, "single", nil)
+func NewAPIv2(h *graph.Handle, wrappers ...HandlerWrapper) *APIv2 {
+	return NewAPIv2Writer(h, "single", nil, wrappers...)
 }
 
-func NewAPIv2Writer(h *graph.Handle, wtype string, wopts graph.Options) *APIv2 {
+func NewAPIv2Writer(h *graph.Handle, wtype string, wopts graph.Options, wrappers ...HandlerWrapper) *APIv2 {
 	api := &APIv2{h: h, wtyp: wtype, wopt: wopts, limit: 100}
 	api.r = httprouter.New()
-	api.RegisterOn(api.r)
+	api.RegisterOn(api.r, wrappers...)
 	return api
 }
 
@@ -115,6 +115,7 @@ const (
 	hdrAccept          = "Accept"
 	hdrAcceptEncoding  = "Accept-Encoding"
 	contentTypeJSON    = "application/json"
+	contentTypeJSONLD  = "application/ld+json"
 )
 
 func getFormat(r *http.Request, formKey string, acceptName string) *quad.Format {
@@ -397,7 +398,7 @@ func (api *APIv2) ServeFormats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *APIv2) queryContext(r *http.Request) (ctx context.Context, cancel func()) {
-	ctx = context.TODO() // TODO(dennwc): get from request
+	ctx = r.Context()
 	if api.timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, api.timeout)
 	} else {
@@ -415,9 +416,11 @@ func defaultErrorFunc(w query.ResponseWriter, err error) {
 }
 
 func writeResults(w io.Writer, r interface{}) {
-	w.Write([]byte(`{"result": `))
-	json.NewEncoder(w).Encode(r)
-	w.Write([]byte("}\n"))
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.Encode(map[string]interface{}{
+		"result": r,
+	})
 }
 
 const maxQuerySize = 1024 * 1024 // 1 MB
@@ -488,23 +491,38 @@ func (api *APIv2) ServeQuery(w http.ResponseWriter, r *http.Request) {
 		clog.Infof("query: %s: %q", lang, qu)
 	}
 
-	c := make(chan query.Result, 5)
-	go ses.Execute(ctx, qu, c, api.limit)
-
-	for res := range c {
-		if err := res.Err(); err != nil {
-			if err == nil {
-				continue // wait for results channel to close
-			}
-			errFunc(w, err)
-			return
-		}
-		ses.Collate(res)
+	opt := query.Options{
+		Collation: query.JSON, // TODO: switch to JSON-LD by default when the time comes
+		Limit:     api.limit,
 	}
-	output, err := ses.Results()
+	if specs := ParseAccept(r.Header, hdrAccept); len(specs) != 0 {
+		// TODO: sort by Q
+		switch specs[0].Value {
+		case contentTypeJSON:
+			opt.Collation = query.JSON
+		case contentTypeJSONLD:
+			opt.Collation = query.JSONLD
+		}
+	}
+	it, err := ses.Execute(ctx, qu, opt)
 	if err != nil {
 		errFunc(w, err)
 		return
 	}
-	writeResults(w, output)
+	defer it.Close()
+
+	var out []interface{}
+	for it.Next(ctx) {
+		out = append(out, it.Result())
+	}
+	if err = it.Err(); err != nil {
+		errFunc(w, err)
+		return
+	}
+	if opt.Collation == query.JSONLD {
+		w.Header().Set(hdrContentType, contentTypeJSONLD)
+	} else {
+		w.Header().Set(hdrContentType, contentTypeJSON)
+	}
+	writeResults(w, out)
 }

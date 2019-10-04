@@ -1,6 +1,7 @@
 package sql
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
@@ -13,8 +14,8 @@ import (
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/graph/log"
 	"github.com/cayleygraph/cayley/internal/lru"
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/quad/pquads"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/pquads"
 )
 
 // Type string for generic sql QuadStore.
@@ -110,16 +111,16 @@ type QuadHashes struct {
 }
 
 type QuadStore struct {
-	db           *sql.DB
-	opt          *Optimizer
-	flavor       Registration
-	ids          *lru.Cache
-	sizes        *lru.Cache
-	noSizes      bool
-	useEstimates bool
+	db      *sql.DB
+	opt     *Optimizer
+	flavor  Registration
+	ids     *lru.Cache
+	sizes   *lru.Cache
+	noSizes bool
 
-	mu   sync.RWMutex
-	size int64
+	mu    sync.RWMutex
+	nodes int64
+	quads int64
 }
 
 func connect(addr string, flavor string, opts graph.Options) (*sql.DB, error) {
@@ -296,7 +297,8 @@ func New(typ string, addr string, options graph.Options) (graph.QuadStore, error
 		db:      conn,
 		opt:     NewOptimizer(),
 		flavor:  fl,
-		size:    -1,
+		quads:   -1,
+		nodes:   -1,
 		sizes:   lru.New(1024),
 		ids:     lru.New(1024),
 		noSizes: true, // Skip size checking by default.
@@ -310,9 +312,6 @@ func New(typ string, addr string, options graph.Options) (graph.QuadStore, error
 		return nil, err
 	} else if ok && local {
 		qs.noSizes = false
-	}
-	if qs.useEstimates, err = options.BoolKey("use_estimates", false); err != nil {
-		return nil, err
 	}
 	return qs, nil
 }
@@ -373,6 +372,46 @@ func NodeValues(h NodeHash, v quad.Value) (ValueType, []interface{}, error) {
 		values = append(values, p)
 	}
 	return nodeKey, values, nil
+}
+
+func (qs *QuadStore) NewQuadWriter() (quad.WriteCloser, error) {
+	return &quadWriter{qs: qs}, nil
+}
+
+type quadWriter struct {
+	qs     *QuadStore
+	deltas []graph.Delta
+}
+
+func (w *quadWriter) WriteQuad(q quad.Quad) error {
+	_, err := w.WriteQuads([]quad.Quad{q})
+	return err
+}
+
+func (w *quadWriter) WriteQuads(buf []quad.Quad) (int, error) {
+	// TODO(dennwc): write an optimized implementation
+	w.deltas = w.deltas[:0]
+	if cap(w.deltas) < len(buf) {
+		w.deltas = make([]graph.Delta, 0, len(buf))
+	}
+	for _, q := range buf {
+		w.deltas = append(w.deltas, graph.Delta{
+			Quad: q, Action: graph.Add,
+		})
+	}
+	err := w.qs.ApplyDeltas(w.deltas, graph.IgnoreOpts{
+		IgnoreDup: true,
+	})
+	w.deltas = w.deltas[:0]
+	if err != nil {
+		return 0, err
+	}
+	return len(buf), nil
+}
+
+func (w *quadWriter) Close() error {
+	w.deltas = nil
+	return nil
 }
 
 func (qs *QuadStore) ApplyDeltas(in []graph.Delta, opts graph.IgnoreOpts) error {
@@ -483,12 +522,14 @@ func (qs *QuadStore) ApplyDeltas(in []graph.Delta, opts graph.IgnoreOpts) error 
 	}
 
 	qs.mu.Lock()
-	qs.size = -1 // TODO(barakmich): Sync size with writes.
+	// TODO(barakmich): Sync size with writes.
+	qs.quads = -1
+	qs.nodes = -1
 	qs.mu.Unlock()
 	return tx.Commit()
 }
 
-func (qs *QuadStore) Quad(val graph.Value) quad.Quad {
+func (qs *QuadStore) Quad(val graph.Ref) quad.Quad {
 	h := val.(QuadHashes)
 	return quad.Quad{
 		Subject:   qs.NameOf(h.Get(quad.Subject)),
@@ -498,7 +539,7 @@ func (qs *QuadStore) Quad(val graph.Value) quad.Quad {
 	}
 }
 
-func (qs *QuadStore) QuadIterator(d quad.Direction, val graph.Value) graph.Iterator {
+func (qs *QuadStore) QuadIterator(d quad.Direction, val graph.Ref) graph.Iterator {
 	v, ok := val.(Value)
 	if !ok {
 		return iterator.NewNull()
@@ -506,6 +547,31 @@ func (qs *QuadStore) QuadIterator(d quad.Direction, val graph.Value) graph.Itera
 	sel := AllQuads("")
 	sel.WhereEq("", dirField(d), v)
 	return qs.NewIterator(sel)
+}
+
+func (qs *QuadStore) querySize(ctx context.Context, sel Select) (graph.Size, error) {
+	sel.Fields = []Field{
+		{Name: "COUNT(*)", Raw: true}, // TODO: proper support for expressions
+	}
+	var sz int64
+	err := qs.QueryRow(ctx, sel).Scan(&sz)
+	if err != nil {
+		return graph.Size{}, err
+	}
+	return graph.Size{
+		Size:  sz,
+		Exact: true,
+	}, nil
+}
+
+func (qs *QuadStore) QuadIteratorSize(ctx context.Context, d quad.Direction, val graph.Ref) (graph.Size, error) {
+	v, ok := val.(Value)
+	if !ok {
+		return graph.Size{Size: 0, Exact: true}, nil
+	}
+	sel := AllQuads("")
+	sel.WhereEq("", dirField(d), v)
+	return qs.querySize(ctx, sel)
 }
 
 func (qs *QuadStore) NodesAllIterator() graph.Iterator {
@@ -516,7 +582,7 @@ func (qs *QuadStore) QuadsAllIterator() graph.Iterator {
 	return qs.NewIterator(AllQuads(""))
 }
 
-func (qs *QuadStore) ValueOf(s quad.Value) graph.Value {
+func (qs *QuadStore) ValueOf(s quad.Value) graph.Ref {
 	return NodeHash(HashOf(s))
 }
 
@@ -557,7 +623,7 @@ func (nt NullTime) Value() (driver.Value, error) {
 	return nt.Time, nil
 }
 
-func (qs *QuadStore) NameOf(v graph.Value) quad.Value {
+func (qs *QuadStore) NameOf(v graph.Ref) quad.Value {
 	if v == nil {
 		if clog.V(2) {
 			clog.Infof("NameOf was nil")
@@ -669,48 +735,59 @@ func (qs *QuadStore) NameOf(v graph.Value) quad.Value {
 	return val
 }
 
-func (qs *QuadStore) Size() int64 {
+func (qs *QuadStore) Stats(ctx context.Context, exact bool) (graph.Stats, error) {
+	st := graph.Stats{
+		Nodes: graph.Size{Exact: true},
+		Quads: graph.Size{Exact: true},
+	}
 	qs.mu.RLock()
-	sz := qs.size
+	st.Quads.Size = qs.quads
+	st.Nodes.Size = qs.nodes
 	qs.mu.RUnlock()
-	if sz >= 0 {
-		return sz
+	if st.Quads.Size >= 0 {
+		return st, nil
 	}
-
-	query := "SELECT COUNT(*) FROM quads;"
-	if qs.useEstimates && qs.flavor.Estimated != nil {
-		query = qs.flavor.Estimated("quads")
+	query := func(table string) string {
+		return "SELECT COUNT(*) FROM " + table + ";"
 	}
-
-	err := qs.db.QueryRow(query).Scan(&sz)
+	if !exact && qs.flavor.Estimated != nil {
+		query = qs.flavor.Estimated
+		st.Quads.Exact = false
+		st.Nodes.Exact = false
+	}
+	err := qs.db.QueryRow(query("quads")).Scan(&st.Quads.Size)
 	if err != nil {
-		clog.Errorf("Couldn't execute COUNT: %v", err)
-		return 0
+		return graph.Stats{}, err
 	}
-	qs.mu.Lock()
-	qs.size = sz
-	qs.mu.Unlock()
-	return sz
+	err = qs.db.QueryRow(query("nodes")).Scan(&st.Nodes.Size)
+	if err != nil {
+		return graph.Stats{}, err
+	}
+	if st.Quads.Exact {
+		qs.mu.Lock()
+		qs.quads = st.Quads.Size
+		qs.nodes = st.Nodes.Size
+		qs.mu.Unlock()
+	}
+	return st, nil
 }
 
 func (qs *QuadStore) Close() error {
 	return qs.db.Close()
 }
 
-func (qs *QuadStore) QuadDirection(in graph.Value, d quad.Direction) graph.Value {
+func (qs *QuadStore) QuadDirection(in graph.Ref, d quad.Direction) graph.Ref {
 	return NodeHash{in.(QuadHashes).Get(d)}
 }
 
-func (qs *QuadStore) sizeForIterator(isAll bool, dir quad.Direction, hash NodeHash) int64 {
+func (qs *QuadStore) sizeForIterator(dir quad.Direction, hash NodeHash) int64 {
 	var err error
-	if isAll {
-		return qs.Size()
-	}
 	if qs.noSizes {
+		st, _ := qs.Stats(context.TODO(), false)
 		if dir == quad.Predicate {
-			return (qs.Size() / 100) + 1
+			return (st.Quads.Size / 100) + 1
 		}
-		return (qs.Size() / 1000) + 1
+		return (st.Quads.Size / 1000) + 1
 	}
 	if val, ok := qs.sizes.Get(hash.String() + string(dir.Prefix())); ok {
 		return val.(int64)

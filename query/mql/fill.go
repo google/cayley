@@ -19,10 +19,10 @@ import (
 	"sort"
 
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
-func (q *Query) treeifyResult(tags map[string]graph.Value) map[ResultPath]string {
+func (q *Query) treeifyResult(tags map[string]graph.Ref) map[ResultPath]string {
 	// Transform the map into something a little more interesting.
 	results := make(map[Path]string)
 	for k, v := range tags {

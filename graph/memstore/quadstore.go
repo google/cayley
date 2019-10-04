@@ -15,13 +15,14 @@
 package memstore
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 const QuadStoreType = "memstore"
@@ -304,6 +305,38 @@ func (qs *QuadStore) WriteQuad(q quad.Quad) error {
 	return nil
 }
 
+// WriteQuads implements quad.Writer.
+func (qs *QuadStore) WriteQuads(buf []quad.Quad) (int, error) {
+	for _, q := range buf {
+		qs.AddQuad(q)
+	}
+	return len(buf), nil
+}
+
+func (qs *QuadStore) NewQuadWriter() (quad.WriteCloser, error) {
+	return &quadWriter{qs: qs}, nil
+}
+
+type quadWriter struct {
+	qs *QuadStore
+}
+
+func (w *quadWriter) WriteQuad(q quad.Quad) error {
+	w.qs.AddQuad(q)
+	return nil
+}
+
+func (w *quadWriter) WriteQuads(buf []quad.Quad) (int, error) {
+	for _, q := range buf {
+		w.qs.AddQuad(q)
+	}
+	return len(buf), nil
+}
+
+func (w *quadWriter) Close() error {
+	return nil
+}
+
 func (qs *QuadStore) deleteQuadNodes(q internalQuad) {
 	for dir := quad.Subject; dir <= quad.Label; dir++ {
 		id := q.Dir(dir)
@@ -407,7 +440,7 @@ func (qs *QuadStore) ApplyDeltas(deltas []graph.Delta, ignoreOpts graph.IgnoreOp
 	return nil
 }
 
-func asID(v graph.Value) (int64, bool) {
+func asID(v graph.Ref) (int64, bool) {
 	switch v := v.(type) {
 	case bnode:
 		return int64(v), true
@@ -418,7 +451,7 @@ func asID(v graph.Value) (int64, bool) {
 	}
 }
 
-func (qs *QuadStore) quad(v graph.Value) (q internalQuad, ok bool) {
+func (qs *QuadStore) quad(v graph.Ref) (q internalQuad, ok bool) {
 	switch v := v.(type) {
 	case bnode:
 		p := qs.prim[int64(v)]
@@ -434,7 +467,7 @@ func (qs *QuadStore) quad(v graph.Value) (q internalQuad, ok bool) {
 	return q, !q.Zero()
 }
 
-func (qs *QuadStore) Quad(index graph.Value) quad.Quad {
+func (qs *QuadStore) Quad(index graph.Ref) quad.Quad {
 	q, ok := qs.quad(index)
 	if !ok {
 		return quad.Quad{}
@@ -442,7 +475,7 @@ func (qs *QuadStore) Quad(index graph.Value) quad.Quad {
 	return qs.lookupQuadDirs(q)
 }
 
-func (qs *QuadStore) QuadIterator(d quad.Direction, value graph.Value) graph.Iterator {
+func (qs *QuadStore) QuadIterator(d quad.Direction, value graph.Ref) graph.Iterator {
 	id, ok := asID(value)
 	if !ok {
 		return iterator.NewNull()
@@ -454,11 +487,32 @@ func (qs *QuadStore) QuadIterator(d quad.Direction, value graph.Value) graph.Ite
 	return iterator.NewNull()
 }
 
-func (qs *QuadStore) Size() int64 {
-	return int64(len(qs.prim))
+func (qs *QuadStore) QuadIteratorSize(ctx context.Context, d quad.Direction, v graph.Ref) (graph.Size, error) {
+	id, ok := asID(v)
+	if !ok {
+		return graph.Size{Size: 0, Exact: true}, nil
+	}
+	index, ok := qs.index.Get(d, id)
+	if !ok {
+		return graph.Size{Size: 0, Exact: true}, nil
+	}
+	return graph.Size{Size: int64(index.Len()), Exact: true}, nil
 }
 
-func (qs *QuadStore) ValueOf(name quad.Value) graph.Value {
+func (qs *QuadStore) Stats(ctx context.Context, exact bool) (graph.Stats, error) {
+	return graph.Stats{
+		Nodes: graph.Size{
+			Size:  int64(len(qs.vals)),
+			Exact: true,
+		},
+		Quads: graph.Size{
+			Size:  int64(len(qs.quads)),
+			Exact: true,
+		},
+	}, nil
+}
+
+func (qs *QuadStore) ValueOf(name quad.Value) graph.Ref {
 	if name == nil {
 		return nil
 	}
@@ -469,7 +523,7 @@ func (qs *QuadStore) ValueOf(name quad.Value) graph.Value {
 	return bnode(id)
 }
 
-func (qs *QuadStore) NameOf(v graph.Value) quad.Value {
+func (qs *QuadStore) NameOf(v graph.Ref) quad.Value {
 	if v == nil {
 		return nil
 	} else if v, ok := v.(graph.PreFetchedValue); ok {
@@ -489,7 +543,7 @@ func (qs *QuadStore) QuadsAllIterator() graph.Iterator {
 	return newAllIterator(qs, false, qs.last)
 }
 
-func (qs *QuadStore) QuadDirection(val graph.Value, d quad.Direction) graph.Value {
+func (qs *QuadStore) QuadDirection(val graph.Ref, d quad.Direction) graph.Ref {
 	q, ok := qs.quad(val)
 	if !ok {
 		return nil

@@ -23,7 +23,7 @@ import (
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/graphmock"
 	. "github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 var (
@@ -157,7 +157,7 @@ func TestValueComparison(t *testing.T) {
 var vciContainsTests = []struct {
 	message  string
 	operator Operator
-	check    graph.Value
+	check    graph.Ref
 	expect   bool
 	qs       graph.Namer
 	val      quad.Value

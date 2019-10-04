@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
 	_ "github.com/cayleygraph/cayley/graph/memstore"
@@ -176,7 +176,7 @@ func TestSexp(t *testing.T) {
 			if test.expect != "" {
 				require.Equal(t, qs.ValueOf(quad.StringToValue(test.expect)), it.Result())
 
-				tags := make(map[string]graph.Value)
+				tags := make(map[string]graph.Ref)
 				it.TagResults(tags)
 				for k, v := range test.tags {
 					name := qs.NameOf(tags[k])

@@ -14,8 +14,8 @@ import (
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/path"
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/voc/rdf"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/voc/rdf"
 )
 
 var reflQuadValue = reflect.TypeOf((*quad.Value)(nil)).Elem()
@@ -379,7 +379,7 @@ func isNative(rt reflect.Type) bool { // TODO(dennwc): replace
 	return ok
 }
 
-func keysEqual(v1, v2 graph.Value) bool {
+func keysEqual(v1, v2 graph.Ref) bool {
 	type key interface {
 		Key() interface{}
 	}

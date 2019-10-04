@@ -16,18 +16,23 @@ package gizmo
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"sort"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/dop251/goja"
 
-	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/query"
 	"github.com/cayleygraph/cayley/schema"
-	"github.com/cayleygraph/cayley/voc"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/jsonld"
+	"github.com/cayleygraph/quad/voc"
 )
 
 const Name = "gizmo"
@@ -59,24 +64,47 @@ func NewSession(qs graph.QuadStore) *Session {
 	return s
 }
 
+func lcFirst(str string) string {
+	rune, size := utf8.DecodeRuneInString(str)
+	return string(unicode.ToLower(rune)) + str[size:]
+}
+
+type fieldNameMapper struct{}
+
+func (fieldNameMapper) FieldName(t reflect.Type, f reflect.StructField) string {
+	return lcFirst(f.Name)
+}
+
+const constructMethodPrefix = "New"
+const backwardsCompatibilityPrefix = "Capitalized"
+
+func (fieldNameMapper) MethodName(t reflect.Type, m reflect.Method) string {
+	if strings.HasPrefix(m.Name, backwardsCompatibilityPrefix) {
+		return strings.TrimPrefix(m.Name, backwardsCompatibilityPrefix)
+	}
+	if strings.HasPrefix(m.Name, constructMethodPrefix) {
+		return strings.TrimPrefix(m.Name, constructMethodPrefix)
+	}
+	return lcFirst(m.Name)
+}
+
 type Session struct {
 	qs  graph.QuadStore
 	vm  *goja.Runtime
 	ns  voc.Namespaces
 	sch *schema.Config
+	col query.Collation
 
 	last string
 	p    *goja.Program
 
-	out   chan query.Result
+	out   chan *Result
 	ctx   context.Context
 	limit int
 	count int
 
-	// used only to collate web results
-	dataOutput []interface{}
-	err        error
-	shape      map[string]interface{}
+	err   error
+	shape map[string]interface{}
 }
 
 func (s *Session) context() context.Context {
@@ -88,6 +116,7 @@ func (s *Session) buildEnv() error {
 		return nil
 	}
 	s.vm = goja.New()
+	s.vm.SetFieldNameMapper(fieldNameMapper{})
 	s.vm.Set("graph", &graphObject{s: s})
 	s.vm.Set("g", s.vm.Get("graph"))
 	for name, val := range defaultEnv {
@@ -99,10 +128,24 @@ func (s *Session) buildEnv() error {
 	return nil
 }
 
-func (s *Session) tagsToValueMap(m map[string]graph.Value) map[string]interface{} {
+func (s *Session) quadValueToNative(v quad.Value) interface{} {
+	if v == nil {
+		return nil
+	}
+	if s.col == query.JSONLD {
+		return jsonld.FromValue(v)
+	}
+	out := v.Native()
+	if nv, ok := out.(quad.Value); ok && v == nv {
+		return quad.StringOf(v)
+	}
+	return out
+}
+
+func (s *Session) tagsToValueMap(m map[string]graph.Ref) map[string]interface{} {
 	outputMap := make(map[string]interface{})
 	for k, v := range m {
-		if o := quadValueToNative(s.qs.NameOf(v)); o != nil {
+		if o := s.quadValueToNative(s.qs.NameOf(v)); o != nil {
 			outputMap[k] = o
 		}
 	}
@@ -115,7 +158,7 @@ func (s *Session) runIteratorToArray(it graph.Iterator, limit int) ([]map[string
 	ctx := s.context()
 
 	output := make([]map[string]interface{}, 0)
-	err := graph.Iterate(ctx, it).Limit(limit).TagEach(func(tags map[string]graph.Value) {
+	err := graph.Iterate(ctx, it).Limit(limit).TagEach(func(tags map[string]graph.Ref) {
 		tm := s.tagsToValueMap(tags)
 		if tm == nil {
 			return
@@ -133,7 +176,7 @@ func (s *Session) runIteratorToArrayNoTags(it graph.Iterator, limit int) ([]inte
 
 	output := make([]interface{}, 0)
 	err := graph.Iterate(ctx, it).Paths(false).Limit(limit).EachValue(s.qs, func(v quad.Value) {
-		if o := quadValueToNative(v); o != nil {
+		if o := s.quadValueToNative(v); o != nil {
 			output = append(output, o)
 		}
 	})
@@ -151,7 +194,7 @@ func (s *Session) runIteratorWithCallback(it graph.Iterator, callback goja.Value
 	ctx, cancel := context.WithCancel(s.context())
 	defer cancel()
 	var gerr error
-	err := graph.Iterate(ctx, it).Paths(true).Limit(limit).TagEach(func(tags map[string]graph.Value) {
+	err := graph.Iterate(ctx, it).Paths(true).Limit(limit).TagEach(func(tags map[string]graph.Ref) {
 		tm := s.tagsToValueMap(tags)
 		if tm == nil {
 			return
@@ -168,7 +211,7 @@ func (s *Session) runIteratorWithCallback(it graph.Iterator, callback goja.Value
 }
 
 func (s *Session) send(ctx context.Context, r *Result) bool {
-	if s.limit >= 0 && s.count >= s.limit {
+	if s.limit > 0 && s.count >= s.limit {
 		return false
 	}
 	if s.out == nil {
@@ -183,7 +226,7 @@ func (s *Session) send(ctx context.Context, r *Result) bool {
 		return false
 	}
 	s.count++
-	return s.limit < 0 || s.count < s.limit
+	return s.limit <= 0 || s.count < s.limit
 }
 
 func (s *Session) runIterator(it graph.Iterator) error {
@@ -195,7 +238,7 @@ func (s *Session) runIterator(it graph.Iterator) error {
 	ctx, cancel := context.WithCancel(s.context())
 	defer cancel()
 	stop := false
-	err := graph.Iterate(ctx, it).Paths(true).TagEach(func(tags map[string]graph.Value) {
+	err := graph.Iterate(ctx, it).Paths(true).TagEach(func(tags map[string]graph.Ref) {
 		if !s.send(ctx, &Result{Tags: tags}) {
 			cancel()
 			stop = true
@@ -218,7 +261,7 @@ func (s *Session) countResults(it graph.Iterator) (int64, error) {
 type Result struct {
 	Meta bool
 	Val  interface{}
-	Tags map[string]graph.Value
+	Tags map[string]graph.Ref
 }
 
 func (r *Result) Result() interface{} {
@@ -227,20 +270,24 @@ func (r *Result) Result() interface{} {
 	}
 	return r.Val
 }
-func (r *Result) Err() error { return nil }
 
-func (s *Session) run(qu string) (v goja.Value, err error) {
+func (s *Session) compile(qu string) error {
 	var p *goja.Program
 	if s.last == qu && s.last != "" {
 		p = s.p
 	} else {
+		var err error
 		p, err = goja.Compile("", qu, false)
 		if err != nil {
-			return
+			return err
 		}
 		s.last, s.p = qu, p
 	}
-	v, err = s.vm.RunProgram(p)
+	return nil
+}
+
+func (s *Session) run() (goja.Value, error) {
+	v, err := s.vm.RunProgram(s.p)
 	if e, ok := err.(*goja.Exception); ok && e.Value() != nil {
 		if er, ok := e.Value().Export().(error); ok {
 			err = er
@@ -248,42 +295,124 @@ func (s *Session) run(qu string) (v goja.Value, err error) {
 	}
 	return v, err
 }
-func (s *Session) Execute(ctx context.Context, qu string, out chan query.Result, limit int) {
-	defer close(out)
-	s.out = out
-	s.limit = limit
+func (s *Session) Execute(ctx context.Context, qu string, opt query.Options) (query.Iterator, error) {
+	switch opt.Collation {
+	case query.Raw, query.JSON, query.JSONLD, query.REPL:
+	default:
+		return nil, &query.ErrUnsupportedCollation{Collation: opt.Collation}
+	}
+	if err := s.compile(qu); err != nil {
+		return nil, err
+	}
+	s.limit = opt.Limit
 	s.count = 0
+	ctx, cancel := context.WithCancel(context.Background())
 	s.ctx = ctx
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-ctx.Done():
-			s.vm.Interrupt(ctx.Err())
-		case <-done:
-		}
-	}()
-	v, err := s.run(qu)
-	if err != nil {
-		select {
-		case <-ctx.Done():
-		case out <- query.ErrorResult(err):
-		}
+	s.col = opt.Collation
+	return &results{
+		col: opt.Collation,
+		s:   s,
+		ctx: ctx, cancel: cancel,
+	}, nil
+}
+
+type results struct {
+	s      *Session
+	col    query.Collation
+	ctx    context.Context
+	cancel func()
+
+	running bool
+	errc    chan error
+
+	err error
+	cur *Result
+}
+
+func (it *results) stop(err error) {
+	it.cancel()
+	if !it.running {
 		return
 	}
-	if !goja.IsNull(v) && !goja.IsUndefined(v) {
-		s.send(ctx, &Result{Meta: true, Val: v.Export()})
+	it.s.vm.Interrupt(err)
+	it.running = false
+}
+
+func (it *results) Next(ctx context.Context) bool {
+	if it.errc == nil {
+		it.s.out = make(chan *Result)
+		it.errc = make(chan error, 1)
+		it.running = true
+		go func() {
+			defer close(it.errc)
+			v, err := it.s.run()
+			if err != nil {
+				it.errc <- err
+				return
+			}
+			if !goja.IsNull(v) && !goja.IsUndefined(v) {
+				it.s.send(it.ctx, &Result{Meta: true, Val: v.Export()})
+			}
+		}()
+	}
+	select {
+	case r := <-it.s.out:
+		it.cur = r
+		return true
+	case err := <-it.errc:
+		if err != nil {
+			it.err = err
+		}
+		return false
+	case <-ctx.Done():
+		it.err = ctx.Err()
+		it.stop(it.err)
+		return false
 	}
 }
 
-func (s *Session) FormatREPL(result query.Result) string {
-	if err := result.Err(); err != nil {
-		return fmt.Sprintf("error: %v", err)
+func (it *results) Result() interface{} {
+	if it.cur == nil {
+		return nil
 	}
-	data, ok := result.(*Result)
-	if !ok {
-		return fmt.Sprintf("Error: unexpected result type: %T\n", result)
+	switch it.col {
+	case query.Raw:
+		return it.cur
+	case query.JSON, query.JSONLD:
+		return it.jsonResult()
+	case query.REPL:
+		return it.replResult()
 	}
+	return nil
+}
+
+func (it *results) jsonResult() interface{} {
+	data := it.cur
+	if data.Meta {
+		return nil
+	}
+	if data.Val != nil {
+		return data.Val
+	}
+	obj := make(map[string]interface{})
+	tags := data.Tags
+	var tagKeys []string
+	for k := range tags {
+		tagKeys = append(tagKeys, k)
+	}
+	sort.Strings(tagKeys)
+	for _, k := range tagKeys {
+		if name := it.s.qs.NameOf(tags[k]); name != nil {
+			obj[k] = it.s.quadValueToNative(name)
+		} else {
+			delete(obj, k)
+		}
+	}
+	return obj
+}
+
+func (it *results) replResult() interface{} {
+	data := it.cur
 	if data.Meta {
 		if data.Val != nil {
 			s := data.Val
@@ -310,7 +439,7 @@ func (s *Session) FormatREPL(result query.Result) string {
 			if k == "$_" {
 				continue
 			}
-			out += fmt.Sprintf("%s : %s\n", k, quadValueToString(s.qs.NameOf(tags[k])))
+			out += fmt.Sprintf("%s : %s\n", k, quadValueToString(it.s.qs.NameOf(tags[k])))
 		}
 	} else {
 		switch export := data.Val.(type) {
@@ -329,59 +458,25 @@ func (s *Session) FormatREPL(result query.Result) string {
 	return out
 }
 
+func (it *results) Err() error {
+	return it.err
+}
+
+func (it *results) Close() error {
+	it.stop(errors.New("iterator closed"))
+	return nil
+}
+
 // Web stuff
 
 func (s *Session) ShapeOf(qu string) (interface{}, error) {
 	s.shape = make(map[string]interface{})
-	_, err := s.run(qu)
+	err := s.compile(qu)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.run()
 	out := s.shape
 	s.shape = nil
 	return out, err
-}
-
-func (s *Session) Collate(result query.Result) {
-	if err := result.Err(); err != nil {
-		s.err = err
-		return
-	}
-	data, ok := result.(*Result)
-	if !ok {
-		clog.Errorf("unexpected result type: %T", result)
-		return
-	} else if data.Meta {
-		return
-	}
-	if data.Val != nil {
-		s.dataOutput = append(s.dataOutput, data.Val)
-		return
-	}
-	obj := make(map[string]interface{})
-	tags := data.Tags
-	var tagKeys []string
-	for k := range tags {
-		tagKeys = append(tagKeys, k)
-	}
-	sort.Strings(tagKeys)
-	for _, k := range tagKeys {
-		if name := s.qs.NameOf(tags[k]); name != nil {
-			obj[k] = quadValueToNative(name)
-		} else {
-			delete(obj, k)
-		}
-	}
-	if len(obj) != 0 {
-		s.dataOutput = append(s.dataOutput, obj)
-	}
-}
-
-func (s *Session) Results() (interface{}, error) {
-	defer s.Clear()
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.dataOutput, nil
-}
-
-func (s *Session) Clear() {
-	s.dataOutput = nil
 }

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/schema"
+	"github.com/cayleygraph/quad"
 )
 
 type quadSlice []quad.Quad
@@ -14,6 +14,11 @@ type quadSlice []quad.Quad
 func (s *quadSlice) WriteQuad(q quad.Quad) error {
 	*s = append(*s, q)
 	return nil
+}
+
+func (s *quadSlice) WriteQuads(buf []quad.Quad) (int, error) {
+	*s = append(*s, buf...)
+	return len(buf), nil
 }
 
 func TestWriteAsQuads(t *testing.T) {

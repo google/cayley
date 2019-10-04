@@ -30,8 +30,8 @@ import (
 
 	"github.com/cayleygraph/cayley/clog"
 	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/quad/nquads"
 	"github.com/cayleygraph/cayley/query"
+	"github.com/cayleygraph/quad/nquads"
 )
 
 func trace(s string) (string, time.Time) {
@@ -41,7 +41,7 @@ func trace(s string) (string, time.Time) {
 func un(s string, startTime time.Time) {
 	endTime := time.Now()
 
-	fmt.Printf(s, float64(endTime.UnixNano()-startTime.UnixNano())/float64(1E6))
+	fmt.Printf(s, float64(endTime.UnixNano()-startTime.UnixNano())/float64(1e6))
 }
 
 func Run(ctx context.Context, qu string, ses query.REPLSession) error {
@@ -53,14 +53,20 @@ func Run(ctx context.Context, qu string, ses query.REPLSession) error {
 		}
 	}()
 	fmt.Printf("\n")
-	c := make(chan query.Result, 5)
-	go ses.Execute(ctx, qu, c, 100)
-	for res := range c {
-		if err := res.Err(); err != nil {
-			return err
-		}
-		fmt.Print(ses.FormatREPL(res))
+	it, err := ses.Execute(ctx, qu, query.Options{
+		Collation: query.REPL,
+		Limit:     100,
+	})
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.Next(ctx) {
+		fmt.Print(it.Result())
 		nResults++
+	}
+	if err := it.Err(); err != nil {
+		return err
 	}
 	if nResults > 0 {
 		results := "Result"

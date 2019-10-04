@@ -21,7 +21,7 @@ import (
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 type applyMorphism func(shape.Shape, *pathContext) (shape.Shape, *pathContext)
@@ -96,7 +96,7 @@ func StartPath(qs graph.QuadStore, nodes ...quad.Value) *Path {
 }
 
 // StartPathNodes creates a new Path from a set of nodes and an underlying QuadStore.
-func StartPathNodes(qs graph.QuadStore, nodes ...graph.Value) *Path {
+func StartPathNodes(qs graph.QuadStore, nodes ...graph.Ref) *Path {
 	return newPath(qs, isNodeMorphism(nodes...))
 }
 

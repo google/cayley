@@ -18,10 +18,10 @@ import (
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/graph/path"
 	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
-	"github.com/cayleygraph/cayley/voc/rdf"
-	"github.com/cayleygraph/cayley/voc/rdfs"
-	"github.com/cayleygraph/cayley/voc/schema"
+	"github.com/cayleygraph/quad"
+	"github.com/cayleygraph/quad/voc/rdf"
+	"github.com/cayleygraph/quad/voc/rdfs"
+	"github.com/cayleygraph/quad/voc/schema"
 )
 
 const (
@@ -274,7 +274,7 @@ func (s *GraphStreamHandler) serveNodesWithProps(ctx context.Context, gs *GraphS
 	itc := graph.Iterate(ictx, nodes).On(s.QS).Limit(limit)
 
 	qi := 0
-	_ = itc.EachValuePair(s.QS, func(v graph.Value, nv quad.Value) {
+	_ = itc.EachValuePair(s.QS, func(v graph.Ref, nv quad.Value) {
 		if _, skip := ignore[nv]; skip {
 			return
 		}

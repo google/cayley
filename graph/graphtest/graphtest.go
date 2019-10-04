@@ -2,6 +2,7 @@ package graphtest
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"testing"
@@ -12,9 +13,9 @@ import (
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/graph/path/pathtest"
 	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/schema"
 	"github.com/cayleygraph/cayley/writer"
+	"github.com/cayleygraph/quad"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,7 +72,12 @@ func TestAll(t *testing.T, gen testutil.DatabaseFunc, conf *Config) {
 		TestWriters(t, gen, conf)
 	})
 	t.Run("1k", func(t *testing.T) {
-		Test1K(t, gen, conf)
+		t.Run("tx", func(t *testing.T) {
+			Test1K(t, gen, conf)
+		})
+		t.Run("batch", func(t *testing.T) {
+			Test1KBatch(t, gen, conf)
+		})
 	})
 	t.Run("paths", func(t *testing.T) {
 		pathtest.RunTestMorphisms(t, gen)
@@ -81,9 +87,12 @@ func TestAll(t *testing.T, gen testutil.DatabaseFunc, conf *Config) {
 	})
 }
 
-func BenchmarkAll(t *testing.B, gen testutil.DatabaseFunc, conf *Config) {
-	t.Run("integration", func(t *testing.B) {
-		BenchmarkIntegration(t, gen, conf.AlwaysRunIntegration)
+func BenchmarkAll(b *testing.B, gen testutil.DatabaseFunc, conf *Config) {
+	b.Run("import", func(b *testing.B) {
+		BenchmarkImport(b, gen)
+	})
+	b.Run("integration", func(b *testing.B) {
+		BenchmarkIntegration(b, gen, conf.AlwaysRunIntegration)
 	})
 }
 
@@ -212,11 +221,13 @@ func TestLoadOneQuad(t testing.TB, gen testutil.DatabaseFunc, c *Config) {
 		require.NotNil(t, val, "quad store failed to decode value: %q", pq)
 		require.Equal(t, pq, val, "quad store failed to roundtrip value: %q", pq)
 	}
-	exp := int64(5)
-	if c.NoPrimitives {
-		exp = 1
+	exp := graph.Stats{
+		Nodes: graph.Size{Size: 4, Exact: true},
+		Quads: graph.Size{Size: 1, Exact: true},
 	}
-	require.Equal(t, exp, qs.Size(), "Unexpected quadstore size")
+	st, err := qs.Stats(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, exp, st, "Unexpected quadstore size")
 
 	ExpectIteratedQuads(t, qs, qs.QuadsAllIterator(), []quad.Quad{q}, false)
 }
@@ -244,11 +255,13 @@ func testLoadDup(t testing.TB, gen testutil.DatabaseFunc, c *Config, single bool
 		require.NoError(t, err)
 	}
 
-	exp := int64(5)
-	if c.NoPrimitives {
-		exp = 1
+	exp := graph.Stats{
+		Nodes: graph.Size{Size: 4, Exact: true},
+		Quads: graph.Size{Size: 1, Exact: true},
 	}
-	require.Equal(t, exp, qs.Size(), "Unexpected quadstore size")
+	st, err := qs.Stats(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, exp, st, "Unexpected quadstore size")
 
 	ExpectIteratedQuads(t, qs, qs.QuadsAllIterator(), []quad.Quad{q}, false)
 }
@@ -278,16 +291,43 @@ func TestLoadDupRaw(t testing.TB, gen testutil.DatabaseFunc, c *Config) {
 	}, graph.IgnoreOpts{IgnoreDup: true})
 	require.NoError(t, err)
 
-	exp := int64(5)
-	if c.NoPrimitives {
-		exp = 1
+	exp := graph.Stats{
+		Nodes: graph.Size{Size: 4, Exact: true},
+		Quads: graph.Size{Size: 1, Exact: true},
 	}
-	require.Equal(t, exp, qs.Size(), "Unexpected quadstore size")
+	st, err := qs.Stats(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, exp, st, "Unexpected quadstore size")
 
 	ExpectIteratedQuads(t, qs, qs.QuadsAllIterator(), []quad.Quad{q}, false)
 }
 
 func TestWriters(t *testing.T, gen testutil.DatabaseFunc, c *Config) {
+	t.Run("batch", func(t *testing.T) {
+		qs, _, closer := gen(t)
+		defer closer()
+
+		w, err := qs.NewQuadWriter()
+		require.NoError(t, err)
+		defer w.Close()
+
+		quads := MakeQuadSet()
+		q1 := quads[:len(quads)/2]
+		q2 := quads[len(q1):]
+
+		n, err := w.WriteQuads(q1)
+		require.NoError(t, err)
+		require.Equal(t, len(q1), n)
+
+		n, err = w.WriteQuads(q2)
+		require.NoError(t, err)
+		require.Equal(t, len(q2), n)
+
+		err = w.Close()
+		require.NoError(t, err)
+
+		ExpectIteratedQuads(t, qs, qs.QuadsAllIterator(), quads, true)
+	})
 	for _, mis := range []bool{false, true} {
 		for _, dup := range []bool{false, true} {
 			name := []byte("__")
@@ -387,8 +427,38 @@ func Test1K(t *testing.T, gen testutil.DatabaseFunc, c *Config) {
 	ExpectIteratedQuads(t, qs, qs.QuadsAllIterator(), exp, true)
 }
 
+func Test1KBatch(t *testing.T, gen testutil.DatabaseFunc, c *Config) {
+	qs, _, closer := gen(t)
+	defer closer()
+
+	pg := c.PageSize
+	if pg == 0 {
+		pg = 100
+	}
+	n := pg*3 + 1
+
+	exp := make([]quad.Quad, 0, n)
+	for i := 0; i < n; i++ {
+		q := quad.Make(i, i, i, nil)
+		exp = append(exp, q)
+	}
+
+	qw, err := qs.NewQuadWriter()
+	require.NoError(t, err)
+	defer qw.Close()
+
+	n, err = qw.WriteQuads(exp)
+	require.NoError(t, err)
+	require.Equal(t, len(exp), n)
+
+	err = qw.Close()
+	require.NoError(t, err)
+
+	ExpectIteratedQuads(t, qs, qs.QuadsAllIterator(), exp, true)
+}
+
 type ValueSizer interface {
-	SizeOf(graph.Value) int64
+	SizeOf(graph.Ref) int64
 }
 
 func TestSizes(t testing.TB, gen testutil.DatabaseFunc, conf *Config) {
@@ -399,11 +469,14 @@ func TestSizes(t testing.TB, gen testutil.DatabaseFunc, conf *Config) {
 
 	err := w.AddQuadSet(MakeQuadSet())
 	require.NoError(t, err)
-	exp := int64(22)
-	if conf.NoPrimitives {
-		exp = 11
+
+	exp := graph.Stats{
+		Nodes: graph.Size{Size: 11, Exact: true},
+		Quads: graph.Size{Size: 11, Exact: true},
 	}
-	require.Equal(t, exp, qs.Size(), "Unexpected quadstore size")
+	st, err := qs.Stats(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, exp, st, "Unexpected quadstore size")
 
 	if qss, ok := qs.(ValueSizer); ok {
 		s := qss.SizeOf(qs.ValueOf(quad.String("B")))
@@ -425,13 +498,21 @@ func TestSizes(t testing.TB, gen testutil.DatabaseFunc, conf *Config) {
 	))
 	require.True(t, graph.IsQuadNotExist(err))
 	if !conf.SkipSizeCheckAfterDelete {
-		exp = int64(20)
-		if conf.NoPrimitives {
-			exp = 10
+		exp = graph.Stats{
+			Nodes: graph.Size{Size: 10, Exact: true},
+			Quads: graph.Size{Size: 10, Exact: true},
 		}
-		require.Equal(t, exp, qs.Size(), "Unexpected quadstore size after RemoveQuad")
+		st, err := qs.Stats(context.Background(), true)
+		require.NoError(t, err)
+		require.Equal(t, exp, st, "Unexpected quadstore size after RemoveQuad")
 	} else {
-		require.Equal(t, int64(11), qs.Size(), "Unexpected quadstore size")
+		exp = graph.Stats{
+			Nodes: graph.Size{Size: 10, Exact: true},
+			Quads: graph.Size{Size: 11, Exact: true},
+		}
+		st, err := qs.Stats(context.Background(), true)
+		require.NoError(t, err)
+		require.Equal(t, exp, st, "Unexpected quadstore size")
 	}
 
 	if qss, ok := qs.(ValueSizer); ok {
@@ -460,7 +541,7 @@ func TestIterator(t testing.TB, gen testutil.DatabaseFunc, _ *Config) {
 	//}
 
 	optIt, changed := it.Optimize()
-	require.True(t, !changed && optIt == it, "Optimize unexpectedly changed iterator: %v, %T", changed, optIt)
+	require.True(t, !changed && optIt == it, "Optimize unexpectedly changed iterator: %v, %T(%p) vs %T(%p)", changed, optIt, optIt, it, it)
 
 	expect := []string{
 		"A",
@@ -751,11 +832,13 @@ func TestLoadTypedQuads(t testing.TB, gen testutil.DatabaseFunc, conf *Config) {
 			assert.Equal(t, quad.StringOf(pq), quad.StringOf(got), "Failed to roundtrip raw %q (%T)", pq, pq)
 		}
 	}
-	exp := int64(19)
-	if conf.NoPrimitives {
-		exp = 7
+	exp := graph.Stats{
+		Nodes: graph.Size{Size: 12, Exact: true},
+		Quads: graph.Size{Size: 7, Exact: true},
 	}
-	require.Equal(t, exp, qs.Size(), "Unexpected quadstore size")
+	st, err := qs.Stats(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, exp, st, "Unexpected quadstore size")
 }
 
 // TODO(dennwc): add tests to verify that QS behaves in a right way with IgnoreOptions,
@@ -771,11 +854,13 @@ func TestAddRemove(t testing.TB, gen testutil.DatabaseFunc, conf *Config) {
 
 	w := testutil.MakeWriter(t, qs, opts, MakeQuadSet()...)
 
-	sz := int64(22)
-	if conf.NoPrimitives {
-		sz = 11
+	exp := graph.Stats{
+		Nodes: graph.Size{Size: 11, Exact: true},
+		Quads: graph.Size{Size: 11, Exact: true},
 	}
-	require.Equal(t, sz, qs.Size(), "Incorrect number of quads")
+	st, err := qs.Stats(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, exp, st, "Unexpected quadstore size")
 
 	all := qs.NodesAllIterator()
 	expect := []string{
@@ -794,7 +879,7 @@ func TestAddRemove(t testing.TB, gen testutil.DatabaseFunc, conf *Config) {
 	ExpectIteratedRawStrings(t, qs, all, expect)
 
 	// Add more quads, some conflicts
-	err := w.AddQuadSet([]quad.Quad{
+	err = w.AddQuadSet([]quad.Quad{
 		quad.Make("A", "follows", "B", nil), // duplicate
 		quad.Make("F", "follows", "B", nil),
 		quad.Make("C", "follows", "D", nil), // duplicate
@@ -802,11 +887,13 @@ func TestAddRemove(t testing.TB, gen testutil.DatabaseFunc, conf *Config) {
 	})
 	assert.Nil(t, err, "AddQuadSet failed")
 
-	sz = int64(25)
-	if conf.NoPrimitives {
-		sz = 13
+	exp = graph.Stats{
+		Nodes: graph.Size{Size: 12, Exact: true},
+		Quads: graph.Size{Size: 13, Exact: true},
 	}
-	assert.Equal(t, sz, qs.Size(), "Incorrect number of quads")
+	st, err = qs.Stats(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, exp, st, "Unexpected quadstore size")
 
 	all = qs.NodesAllIterator()
 	expect = []string{
@@ -857,11 +944,13 @@ func TestIteratorsAndNextResultOrderA(t testing.TB, gen testutil.DatabaseFunc, c
 
 	testutil.MakeWriter(t, qs, opts, MakeQuadSet()...)
 
-	sz := int64(22)
-	if conf.NoPrimitives {
-		sz = 11
+	exp := graph.Stats{
+		Nodes: graph.Size{Size: 11, Exact: true},
+		Quads: graph.Size{Size: 11, Exact: true},
 	}
-	require.Equal(t, sz, qs.Size(), "Incorrect number of quads")
+	st, err := qs.Stats(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, exp, st, "Unexpected quadstore size")
 
 	fixed := iterator.NewFixed(qs.ValueOf(quad.Raw("C")))
 
@@ -869,9 +958,10 @@ func TestIteratorsAndNextResultOrderA(t testing.TB, gen testutil.DatabaseFunc, c
 
 	all := qs.NodesAllIterator()
 
+	const allTag = "all"
 	innerAnd := iterator.NewAnd(
 		iterator.NewLinksTo(qs, fixed2, quad.Predicate),
-		iterator.NewLinksTo(qs, all, quad.Object),
+		iterator.NewLinksTo(qs, iterator.Tag(all, allTag), quad.Object),
 	)
 
 	hasa := iterator.NewHasA(qs, innerAnd, quad.Subject)
@@ -887,7 +977,9 @@ func TestIteratorsAndNextResultOrderA(t testing.TB, gen testutil.DatabaseFunc, c
 		expect = []string{"B", "D"}
 	)
 	for {
-		got = append(got, quad.ToString(qs.NameOf(all.Result())))
+		m := make(map[string]graph.Ref, 1)
+		outerAnd.TagResults(m)
+		got = append(got, quad.ToString(qs.NameOf(m[allTag])))
 		if !outerAnd.NextPath(ctx) {
 			break
 		}
@@ -1110,4 +1202,54 @@ func TestDeleteReinserted(t testing.TB, gen testutil.DatabaseFunc, _ *Config) {
 		require.NoError(t, err, "Remove quad failed")
 	}
 
+}
+
+func irif(format string, args ...interface{}) quad.IRI {
+	return quad.IRI(fmt.Sprintf(format, args...))
+}
+
+func BenchmarkImport(b *testing.B, gen testutil.DatabaseFunc) {
+	b.StopTimer()
+
+	qs, _, closer := gen(b)
+	defer closer()
+
+	w, err := qs.NewQuadWriter()
+	require.NoError(b, err)
+	defer w.Close()
+
+	const (
+		mult     = 10
+		perBatch = 100
+	)
+
+	quads := make([]quad.Quad, 0, mult*b.N)
+	for i := 0; i < mult*b.N; i++ {
+		quads = append(quads, quad.Quad{
+			Subject:   irif("n%d", i/5),
+			Predicate: quad.IRI("sub"),
+			Object:    irif("n%d", i/2+i%2),
+		})
+	}
+
+	b.ResetTimer()
+	b.StartTimer()
+	for len(quads) > 0 {
+		batch := quads
+		if len(batch) > perBatch {
+			batch = batch[:perBatch]
+		}
+		n, err := w.WriteQuads(batch)
+		if err != nil {
+			b.Fatal(err)
+		} else if n != len(batch) {
+			b.Fatal(n)
+		}
+		quads = quads[len(batch):]
+	}
+	err = w.Close()
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.StopTimer()
 }

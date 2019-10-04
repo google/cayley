@@ -16,8 +16,8 @@ import (
 
 	"github.com/cayleygraph/cayley/graph"
 	"github.com/cayleygraph/cayley/graph/path"
-	"github.com/cayleygraph/cayley/quad"
 	"github.com/cayleygraph/cayley/query"
+	"github.com/cayleygraph/quad"
 )
 
 const Name = "graphql"
@@ -53,40 +53,62 @@ func NewSession(qs graph.QuadStore) *Session {
 	return &Session{qs: qs}
 }
 
-type resultMap map[string]interface{}
-
-func (resultMap) Err() error            { return nil }
-func (m resultMap) Result() interface{} { return map[string]interface{}(m) }
-
 type Session struct {
 	qs graph.QuadStore
 }
 
-func (s *Session) Execute(ctx context.Context, qu string, out chan query.Result, limit int) {
-	defer close(out)
+func (s *Session) Execute(ctx context.Context, qu string, opt query.Options) (query.Iterator, error) {
+	switch opt.Collation {
+	case query.Raw, query.JSON, query.REPL:
+	default:
+		return nil, &query.ErrUnsupportedCollation{Collation: opt.Collation}
+	}
 	q, err := Parse(strings.NewReader(qu))
 	if err != nil {
-		select {
-		case out <- query.ErrorResult(err):
-		case <-ctx.Done():
-		}
-		return
+		return nil, err
 	}
-	m, err := q.Execute(ctx, s.qs)
-	var r query.Result
-	if err != nil {
-		r = query.ErrorResult(err)
-	} else {
-		r = resultMap(m)
-	}
-	select {
-	case out <- r:
-	case <-ctx.Done():
-	}
+	return &results{
+		s:   s,
+		q:   q,
+		col: opt.Collation,
+	}, nil
 }
-func (s *Session) FormatREPL(result query.Result) string {
-	data, _ := json.MarshalIndent(result, "", "   ")
+
+type results struct {
+	s   *Session
+	q   *Query
+	col query.Collation
+	res map[string]interface{}
+	err error
+}
+
+func (it *results) Next(ctx context.Context) bool {
+	if it.q == nil {
+		return false
+	}
+	it.res, it.err = it.q.Execute(ctx, it.s.qs)
+	it.q = nil
+	return it.err == nil && len(it.res) != 0
+}
+
+func (it *results) Result() interface{} {
+	if len(it.res) == 0 {
+		return nil
+	}
+	if it.col != query.REPL {
+		return it.res
+	}
+	data, _ := json.MarshalIndent(it.res, "", "   ")
 	return string(data)
+}
+
+func (it *results) Err() error {
+	return it.err
+}
+
+func (it *results) Close() error {
+	it.q = nil
+	return nil
 }
 
 // Configurable keywords and special field names.
@@ -123,7 +145,7 @@ type field struct {
 func (f field) isSave() bool { return len(f.Has)+len(f.Fields) == 0 && !f.AllFields }
 
 type object struct {
-	id     graph.Value
+	id     graph.Ref
 	fields map[string]interface{}
 }
 
@@ -269,12 +291,12 @@ func iterateObject(ctx context.Context, qs graph.QuadStore, f *field, p *path.Pa
 		if !it.Next(ctx) {
 			break
 		}
-		fields := make(map[string][]graph.Value)
+		fields := make(map[string][]graph.Ref)
 
-		tags := make(map[string]graph.Value)
+		tags := make(map[string]graph.Ref)
 		it.TagResults(tags)
 		for k, v := range tags {
-			fields[k] = []graph.Value{v}
+			fields[k] = []graph.Ref{v}
 		}
 		for it.NextPath(ctx) {
 			select {
@@ -282,7 +304,7 @@ func iterateObject(ctx context.Context, qs graph.QuadStore, f *field, p *path.Pa
 				return out, ctx.Err()
 			default:
 			}
-			tags = make(map[string]graph.Value)
+			tags = make(map[string]graph.Ref)
 			it.TagResults(tags)
 		dedup:
 			for k, v := range tags {

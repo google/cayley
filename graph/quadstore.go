@@ -27,15 +27,15 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/cayleygraph/quad"
 )
 
 type BatchQuadStore interface {
-	ValuesOf(ctx context.Context, vals []Value) ([]quad.Value, error)
-	RefsOf(ctx context.Context, nodes []quad.Value) ([]Value, error)
+	ValuesOf(ctx context.Context, vals []Ref) ([]quad.Value, error)
+	RefsOf(ctx context.Context, nodes []quad.Value) ([]Ref, error)
 }
 
-func ValuesOf(ctx context.Context, qs Namer, vals []Value) ([]quad.Value, error) {
+func ValuesOf(ctx context.Context, qs Namer, vals []Ref) ([]quad.Value, error) {
 	if bq, ok := qs.(BatchQuadStore); ok {
 		return bq.ValuesOf(ctx, vals)
 	}
@@ -46,11 +46,11 @@ func ValuesOf(ctx context.Context, qs Namer, vals []Value) ([]quad.Value, error)
 	return out, nil
 }
 
-func RefsOf(ctx context.Context, qs QuadStore, nodes []quad.Value) ([]Value, error) {
+func RefsOf(ctx context.Context, qs QuadStore, nodes []quad.Value) ([]Ref, error) {
 	if bq, ok := qs.(BatchQuadStore); ok {
 		return bq.RefsOf(ctx, nodes)
 	}
-	values := make([]Value, len(nodes))
+	values := make([]Ref, len(nodes))
 	for i, node := range nodes {
 		value := qs.ValueOf(node)
 		if value == nil {
@@ -64,18 +64,21 @@ func RefsOf(ctx context.Context, qs QuadStore, nodes []quad.Value) ([]Value, err
 type Namer interface {
 	// Given a node ID, return the opaque token used by the QuadStore
 	// to represent that id.
-	ValueOf(quad.Value) Value
+	ValueOf(quad.Value) Ref
 	// Given an opaque token, return the node that it represents.
-	NameOf(Value) quad.Value
+	NameOf(Ref) quad.Value
 }
 
 type QuadIndexer interface {
 	// Given an opaque token, returns the quad for that token from the store.
-	Quad(Value) quad.Quad
+	Quad(Ref) quad.Quad
 
 	// Given a direction and a token, creates an iterator of links which have
 	// that node token in that directional field.
-	QuadIterator(quad.Direction, Value) Iterator
+	QuadIterator(quad.Direction, Ref) Iterator
+
+	// QuadIteratorSize returns an estimated size of an iterator.
+	QuadIteratorSize(ctx context.Context, d quad.Direction, v Ref) (Size, error)
 
 	// Convenience function for speed. Given a quad token and a direction
 	// return the node token for that direction. Sometimes, a QuadStore
@@ -86,7 +89,19 @@ type QuadIndexer interface {
 	//
 	//  qs.ValueOf(qs.Quad(id).Get(dir))
 	//
-	QuadDirection(id Value, d quad.Direction) Value
+	QuadDirection(id Ref, d quad.Direction) Ref
+}
+
+// Size of a graph (either in nodes or quads).
+type Size struct {
+	Size  int64
+	Exact bool
+}
+
+// Stats of a graph.
+type Stats struct {
+	Nodes Size // number of nodes
+	Quads Size // number of quads
 }
 
 type QuadStore interface {
@@ -97,14 +112,21 @@ type QuadStore interface {
 	// is done by a replication strategy.
 	ApplyDeltas(in []Delta, opts IgnoreOpts) error
 
+	// NewQuadWriter starts a batch quad import process.
+	// The order of changes is not guaranteed, neither is the order and result of concurrent ApplyDeltas.
+	NewQuadWriter() (quad.WriteCloser, error)
+
 	// Returns an iterator enumerating all nodes in the graph.
 	NodesAllIterator() Iterator
 
 	// Returns an iterator enumerating all links in the graph.
 	QuadsAllIterator() Iterator
 
-	// Returns the number of quads currently stored.
-	Size() int64
+	// Stats returns the number of nodes and quads currently stored.
+	// Exact flag controls the correctness of the value. It can be an estimation, or a precise calculation.
+	// The quadstore may have a fast way of retrieving the precise stats, in this case it may ignore 'exact'
+	// flag and always return correct stats (with an appropriate flags set in the output).
+	Stats(ctx context.Context, exact bool) (Stats, error)
 
 	// Close the quad store and clean up. (Flush to disk, cleanly
 	// sever connections, etc)

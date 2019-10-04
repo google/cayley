@@ -28,8 +28,8 @@ import (
 	"github.com/cayleygraph/cayley/graph/graphtest/testutil"
 	"github.com/cayleygraph/cayley/graph/iterator"
 	"github.com/cayleygraph/cayley/graph/shape"
-	"github.com/cayleygraph/cayley/quad"
 	_ "github.com/cayleygraph/cayley/writer"
+	"github.com/cayleygraph/quad"
 )
 
 // This is a simple test graph.
@@ -77,7 +77,7 @@ func runTag(qs graph.QuadStore, path *Path, tag string, opt bool) ([]quad.Value,
 	if !opt {
 		pb = pb.UnOptimized()
 	}
-	err := pb.Paths(true).TagEach(func(tags map[string]graph.Value) {
+	err := pb.Paths(true).TagEach(func(tags map[string]graph.Ref) {
 		if t, ok := tags[tag]; ok {
 			out = append(out, qs.NameOf(t))
 		}
