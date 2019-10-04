@@ -1424,18 +1424,18 @@ func FilterQuads(subject, predicate, object, label []quad.Value) Shape {
 	return q
 }
 
-type Order struct {
+type Sort struct {
 	From Shape
 }
 
-func (s Order) BuildIterator(qs graph.QuadStore) graph.Iterator {
+func (s Sort) BuildIterator(qs graph.QuadStore) graph.Iterator {
 	if IsNull(s.From) {
 		return iterator.NewNull()
 	}
 	it := s.From.BuildIterator(qs)
-	return iterator.NewOrder(qs, it)
+	return iterator.NewSort(qs, it)
 }
-func (s Order) Optimize(r Optimizer) (Shape, bool) {
+func (s Sort) Optimize(r Optimizer) (Shape, bool) {
 	if IsNull(s.From) {
 		return nil, true
 	}

@@ -69,7 +69,7 @@ var testQueries = []struct {
 	query   string
 	limit   int
 	tag     string
-	file 	string
+	file    string
 	expect  []string
 	err     bool // TODO(dennwc): define error types for Gizmo and handle them
 }{
@@ -606,7 +606,7 @@ var testQueries = []struct {
 			g.V("<greg>").LabelContext("<smart_graph>").SaveOpt("<status>", "statusTag").All()
 		`,
 		tag:    "statusTag",
-		file: multiGraphTestFile,
+		file:   multiGraphTestFile,
 		expect: []string{"smart_person"},
 	},
 	{
@@ -615,8 +615,30 @@ var testQueries = []struct {
 			g.V("smart_person").LabelContext("<other_graph>").SaveR("<status>", "who").All()
 		`,
 		tag:    "who",
-		file: multiGraphTestFile,
+		file:   multiGraphTestFile,
 		expect: []string{"<fred>"},
+	},
+	{
+		message: "Use order",
+		query: `
+			g.V().Order().All()
+		`,
+		expect: []string{
+			"<alice>",
+			"<are>",
+			"<bob>",
+			"<charlie>",
+			"<dani>",
+			"<emily>",
+			"<follows>",
+			"<fred>",
+			"<greg>",
+			"<predicates>",
+			"<smart_graph>",
+			"<status>",
+			"cool_person",
+			"smart_person",
+		},
 	},
 }
 
@@ -668,10 +690,10 @@ func TestGizmo(t *testing.T) {
 				test.tag = TopResultTag
 			}
 			quads := simpleGraph
-			if (test.file == multiGraphTestFile){
+			if test.file == multiGraphTestFile {
 				quads = multiGraph
 			}
-			
+
 			if test.data != nil {
 				quads = test.data
 			}
@@ -764,6 +786,3 @@ func issue718Nodes() []string {
 	}
 	return nodes
 }
-
-
-

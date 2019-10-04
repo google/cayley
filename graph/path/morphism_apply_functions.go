@@ -416,7 +416,7 @@ func orderMorphism() morphism {
 	return morphism{
 		Reversal: func(ctx *pathContext) (morphism, *pathContext) { return orderMorphism(), ctx },
 		Apply: func(in shape.Shape, ctx *pathContext) (shape.Shape, *pathContext) {
-			return shape.Order{From: in}, ctx
+			return shape.Sort{From: in}, ctx
 		},
 	}
 }
