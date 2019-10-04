@@ -635,7 +635,7 @@ var testQueries = []struct {
 	{
 		message: "Use order",
 		query: `
-			g.V().Order().All()
+			g.V().order().all()
 		`,
 		expect: []string{
 			"<alice>",
