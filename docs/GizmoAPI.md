@@ -691,3 +691,7 @@ cFollows.union(dFollows).all();
 ### `path.unique()`
 
 Unique removes duplicate values from the path.
+
+### `path.order()`
+
+Order returns values from the path in ascending order.
