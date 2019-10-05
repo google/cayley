@@ -138,18 +138,20 @@ func (it *sortIt) SubIterators() []graph.IteratorShape {
 	return []graph.IteratorShape{it.subIt}
 }
 
-// Sort iterator removes duplicate values from it's subiterator.
+// Sort iterator orders values from it's subiterator.
 type Sort struct {
 	it *sortIt
 	graph.Iterator
 }
 
+// NewSort creates a new Sort iterator
 func NewSort(namer graph.Namer, it graph.Iterator) *Sort {
 	return &Sort{
 		it: newSort(namer, graph.AsShape(it)),
 	}
 }
 
+// AsShape returns Sort's underlying iterator shape
 func (it *Sort) AsShape() graph.IteratorShape {
 	return it.it
 }
@@ -201,7 +203,7 @@ func (it *sortContains) Result() graph.Value {
 }
 
 // Contains checks whether the passed value is part of the primary iterator,
-// which is irrelevant for Sortness.
+// which is irrelevant for sorted.
 func (it *sortContains) Contains(ctx context.Context, val graph.Value) bool {
 	return it.subIt.Contains(ctx, val)
 }
