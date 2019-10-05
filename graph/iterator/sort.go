@@ -128,7 +128,7 @@ func (it *sortIt) Stats(ctx context.Context) (graph.IteratorCosts, error) {
 }
 
 func (it *sortIt) String() string {
-	return "sortIt{" + it.subIt.String() + "}"
+	return "Sort"
 }
 
 // SubIterators returns a slice of the sub iterators.
