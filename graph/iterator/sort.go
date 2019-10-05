@@ -8,7 +8,7 @@ import (
 	"github.com/cayleygraph/cayley/quad"
 )
 
-var _ graph.Iterator = &Sort{}
+var _ graph.IteratorFuture = &Sort{}
 
 type value struct {
 	result result
@@ -23,19 +23,137 @@ func (v values) Less(i, j int) bool {
 }
 func (v values) Swap(i, j int) { v[i], v[j] = v[j], v[i] }
 
-// Sort iterator removes duplicate values from it's subiterator.
-type Sort struct {
-	uid      uint64
-	namer    graph.Namer
-	subIt    graph.Iterator
-	result   graph.Value
-	index    int
-	runstats graph.IteratorStats
-	err      error
-	ordered  *values
+type sortNext struct {
+	namer   graph.Namer
+	subIt   graph.Scanner
+	result  graph.Ref
+	err     error
+	index   int
+	ordered values
 }
 
-func getSortedValues(namer graph.Namer, it graph.Iterator) (*values, error) {
+func newSortNext(namer graph.Namer, subIt graph.Scanner) *sortNext {
+	return &sortNext{
+		namer:   namer,
+		subIt:   subIt,
+		ordered: make(values, 0),
+	}
+}
+
+func (it *sortNext) TagResults(dst map[string]graph.Value) {
+	if it.subIt != nil {
+		it.subIt.TagResults(dst)
+	}
+}
+
+func (it *sortNext) Err() error {
+	return it.err
+}
+
+func (it *sortNext) Result() graph.Value {
+	return it.result
+}
+
+func (it *sortNext) Next(ctx context.Context) bool {
+	if it.ordered == nil {
+		v, err := getSortedValues(it.namer, it.subIt)
+		it.ordered = v
+		it.err = err
+	}
+	ordered := it.ordered
+	if it.index < len(ordered) {
+		it.result = ordered[it.index].result.id
+		it.index++
+		return true
+	}
+	return false
+}
+
+func (it *sortNext) NextPath(ctx context.Context) bool {
+	return false
+}
+
+func (it *sortNext) Close() error {
+	it.ordered = nil
+	return it.subIt.Close()
+}
+
+func (it *sortNext) String() string {
+	return "SortNext"
+}
+
+type sortIt struct {
+	namer graph.Namer
+	subIt graph.IteratorShape
+}
+
+var _ graph.IteratorShapeCompat = (*sortIt)(nil)
+
+func newSort(namer graph.Namer, subIt graph.IteratorShape) *sortIt {
+	return &sortIt{namer, subIt}
+}
+
+func (it *sortIt) Iterate() graph.Scanner {
+	return newSortNext(it.namer, it.subIt.Iterate())
+}
+
+func (it *sortIt) AsLegacy() graph.Iterator {
+	it2 := &Sort{it: it}
+	it2.Iterator = graph.NewLegacy(it, it2)
+	return it2
+}
+
+func (it *sortIt) Lookup() graph.Index {
+	return newSortContains(it.subIt.Lookup())
+}
+
+func (it *sortIt) Optimize(ctx context.Context) (graph.IteratorShape, bool) {
+	newIt, optimized := it.subIt.Optimize(ctx)
+	if optimized {
+		it.subIt = newIt
+	}
+	return it, false
+}
+
+func (it *sortIt) Stats(ctx context.Context) (graph.IteratorCosts, error) {
+	subStats, err := it.subIt.Stats(ctx)
+	return graph.IteratorCosts{
+		NextCost:     subStats.NextCost,
+		ContainsCost: subStats.ContainsCost,
+		Size: graph.Size{
+			Size:  subStats.Size.Size,
+			Exact: true,
+		},
+	}, err
+}
+
+func (it *sortIt) String() string {
+	return "sortIt{" + it.subIt.String() + "}"
+}
+
+// SubIterators returns a slice of the sub iterators.
+func (it *sortIt) SubIterators() []graph.IteratorShape {
+	return []graph.IteratorShape{it.subIt}
+}
+
+// Sort iterator removes duplicate values from it's subiterator.
+type Sort struct {
+	it *sortIt
+	graph.Iterator
+}
+
+func NewSort(namer graph.Namer, it graph.Iterator) *Sort {
+	return &Sort{
+		it: newSort(namer, graph.AsShape(it)),
+	}
+}
+
+func (it *Sort) AsShape() graph.IteratorShape {
+	it.Close()
+	return it.it
+}
+
+func getSortedValues(namer graph.Namer, it graph.Scanner) (values, error) {
 	var v values
 	var ctx = context.TODO()
 
@@ -50,122 +168,55 @@ func getSortedValues(namer graph.Namer, it graph.Iterator) (*values, error) {
 		v = append(v, value)
 		err := it.Err()
 		if err != nil {
-			return &v, err
+			return v, err
 		}
 	}
 
 	sort.Sort(v)
 
-	it.Reset()
-
-	return &v, nil
+	return v, nil
 }
 
-func NewSort(namer graph.Namer, subIt graph.Iterator) *Sort {
-	return &Sort{
-		namer:   namer,
-		uid:     NextUID(),
-		subIt:   subIt,
-		ordered: nil,
+type sortContains struct {
+	subIt graph.Index
+}
+
+func newSortContains(subIt graph.Index) *sortContains {
+	return &sortContains{subIt}
+}
+
+func (it *sortContains) TagResults(dst map[string]graph.Value) {
+	if it.subIt != nil {
+		it.subIt.TagResults(dst)
 	}
 }
 
-func (it *Sort) UID() uint64 {
-	return it.uid
+func (it *sortContains) Err() error {
+	return it.subIt.Err()
 }
 
-// Reset resets the internal iterators and the iterator itself.
-func (it *Sort) Reset() {
-	it.result = nil
-	it.index = 0
-	it.subIt.Reset()
-}
-
-func (it *Sort) TagResults(dst map[string]graph.Value) {
-	var prevIndex = it.index - 1
-	var ordered = *it.ordered
-	for tag, value := range ordered[prevIndex].result.tags {
-		dst[tag] = value
-	}
-}
-
-// SubIterators returns a slice of the sub iterators.
-func (it *Sort) SubIterators() []graph.Iterator {
-	return []graph.Iterator{it.subIt}
-}
-
-// Next advances the subiterator, continuing until it returns a value which it
-// has not previously seen.
-func (it *Sort) Next(ctx context.Context) bool {
-	it.runstats.Next++
-	if it.ordered == nil {
-		v, err := getSortedValues(it.namer, it.subIt)
-		it.ordered = v
-		it.err = err
-	}
-	if it.index < len(*it.ordered) {
-		ordered := *it.ordered
-		it.result = ordered[it.index].result.id
-		it.index += 1
-		return true
-	}
-	return false
-}
-
-func (it *Sort) Err() error {
-	return it.err
-}
-
-func (it *Sort) Result() graph.Value {
-	return it.result
+func (it *sortContains) Result() graph.Value {
+	return it.subIt.Result()
 }
 
 // Contains checks whether the passed value is part of the primary iterator,
 // which is irrelevant for Sortness.
-func (it *Sort) Contains(ctx context.Context, val graph.Value) bool {
-	it.runstats.Contains += 1
+func (it *sortContains) Contains(ctx context.Context, val graph.Value) bool {
 	return it.subIt.Contains(ctx, val)
 }
 
 // NextPath for Sort always returns false. If we were to return multiple
 // paths, we'd no longer be a Sort result, so we have to choose only the first
 // path that got us here. Sort is serious on this point.
-func (it *Sort) NextPath(ctx context.Context) bool {
+func (it *sortContains) NextPath(ctx context.Context) bool {
 	return false
 }
 
 // Close closes the primary iterators.
-func (it *Sort) Close() error {
-	it.ordered = nil
+func (it *sortContains) Close() error {
 	return it.subIt.Close()
 }
 
-func (it *Sort) Optimize() (graph.Iterator, bool) {
-	newIt, optimized := it.subIt.Optimize()
-	if optimized {
-		it.subIt = newIt
-	}
-	return it, false
-}
-
-func (it *Sort) Stats() graph.IteratorStats {
-	subStats := it.subIt.Stats()
-	return graph.IteratorStats{
-		NextCost:     subStats.NextCost,
-		ContainsCost: subStats.ContainsCost,
-		Size:         int64(len(*it.ordered)),
-		ExactSize:    true,
-		Next:         it.runstats.Next,
-		Contains:     it.runstats.Contains,
-		ContainsNext: it.runstats.ContainsNext,
-	}
-}
-
-func (it *Sort) Size() (int64, bool) {
-	st := it.Stats()
-	return st.Size, st.ExactSize
-}
-
-func (it *Sort) String() string {
-	return "Sort{" + it.subIt.String() + "}"
+func (it *sortContains) String() string {
+	return "SortContains"
 }
