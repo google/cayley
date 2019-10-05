@@ -26,17 +26,16 @@ func (v values) Swap(i, j int) { v[i], v[j] = v[j], v[i] }
 type sortNext struct {
 	namer   graph.Namer
 	subIt   graph.Scanner
+	ordered *values
 	result  graph.Ref
 	err     error
 	index   int
-	ordered values
 }
 
 func newSortNext(namer graph.Namer, subIt graph.Scanner) *sortNext {
 	return &sortNext{
-		namer:   namer,
-		subIt:   subIt,
-		ordered: make(values, 0),
+		namer: namer,
+		subIt: subIt,
 	}
 }
 
@@ -60,7 +59,10 @@ func (it *sortNext) Next(ctx context.Context) bool {
 		it.ordered = v
 		it.err = err
 	}
-	ordered := it.ordered
+	if it.err != nil {
+		return false
+	}
+	ordered := *it.ordered
 	if it.index < len(ordered) {
 		it.result = ordered[it.index].result.id
 		it.index++
@@ -149,11 +151,10 @@ func NewSort(namer graph.Namer, it graph.Iterator) *Sort {
 }
 
 func (it *Sort) AsShape() graph.IteratorShape {
-	it.Close()
 	return it.it
 }
 
-func getSortedValues(namer graph.Namer, it graph.Scanner) (values, error) {
+func getSortedValues(namer graph.Namer, it graph.Scanner) (*values, error) {
 	var v values
 	var ctx = context.TODO()
 
@@ -168,13 +169,13 @@ func getSortedValues(namer graph.Namer, it graph.Scanner) (values, error) {
 		v = append(v, value)
 		err := it.Err()
 		if err != nil {
-			return v, err
+			return &v, err
 		}
 	}
 
 	sort.Sort(v)
 
-	return v, nil
+	return &v, nil
 }
 
 type sortContains struct {
