@@ -46,8 +46,9 @@ type Step interface {
 	BuildIterator(qs graph.QuadStore) (query.Iterator, error)
 }
 
-// ValueStep is a ValueStep that can build a ValueIterator.
+// ValueStep is a Step that can build a ValueIterator.
 type ValueStep interface {
+	Step
 	BuildValueIterator(qs graph.QuadStore) (*ValueIterator, error)
 }
 
